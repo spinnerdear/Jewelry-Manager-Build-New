@@ -268,8 +268,12 @@ class JewelryManagerApp:
             messagebox.showerror("Error", "Setup Photo 1 and 2 paths first.")
             return
 
-        self.log("Starting Collect Photos Phase...", "info")
+        self.log("--- Starting Collect Photos Phase ---", "info")
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
+        
+        errors = []
+        success_count = 0
+        skipped_count = 0
         
         for folder_name in folders:
             folder_path = os.path.join(src, folder_name)
@@ -297,13 +301,20 @@ class JewelryManagerApp:
                 t1_dir = os.path.join(p1, target_rel_dir)
                 t2_dir = os.path.join(p2, target_rel_dir)
                 
-                # ISSUE FIX: Check if folders exist. If not, don't create, warn user.
-                if not os.path.exists(t1_dir):
-                    self.log(f"ไม่พบโฟลเดอร์ปลายทางใน Photo 1: {target_rel_dir}", "error")
-                    self.log(f"รหัส {folder_name} อาจจะผิด หรือมีการเว้นวรรคไม่ตรงกัน", "warning")
-                    continue
+                # Check Photo 1 & Photo 2 folders separately
+                p1_exists = os.path.exists(t1_dir)
+                p2_exists = os.path.exists(t2_dir)
                 
-                # Check for existing file (ignore extension)
+                if not p1_exists or not p2_exists:
+                    msg = f"รหัส {folder_name}: "
+                    if not p1_exists: msg += "[ไม่พบโฟลเดอร์ใน Photo 1] "
+                    if not p2_exists: msg += "[ไม่พบโฟลเดอร์ใน Photo 2] "
+                    self.log(msg, "error")
+                    errors.append(msg)
+                    skipped_count += 1
+                    continue # Skip to next folder
+
+                # Check for existing files
                 old_p1 = None
                 for f in os.listdir(t1_dir):
                     if os.path.splitext(f)[0] == folder_name:
@@ -311,28 +322,47 @@ class JewelryManagerApp:
                         break
                 
                 old_p2 = None
-                if os.path.exists(t2_dir):
-                    for f in os.listdir(t2_dir):
-                        if os.path.splitext(f)[0] == folder_name:
-                            old_p2 = os.path.join(t2_dir, f)
-                            break
+                for f in os.listdir(t2_dir):
+                    if os.path.splitext(f)[0] == folder_name:
+                        old_p2 = os.path.join(t2_dir, f)
+                        break
 
                 src_file = os.path.join(folder_path, main_file)
 
-                # Show Preview with BOTH old files
+                # Show Preview
                 if self.show_preview(old_p1, old_p2, src_file, target_rel_dir):
-                    # Replace in P1
-                    if old_p1: os.remove(old_p1)
-                    shutil.copy2(src_file, os.path.join(t1_dir, main_file))
-                    # Replace in P2
-                    if os.path.exists(t2_dir):
+                    # Action Photo 1
+                    try:
+                        if old_p1: os.remove(old_p1)
+                        shutil.copy2(src_file, os.path.join(t1_dir, main_file))
+                        self.log(f"Photo 1: บันทึกสำเร็จ ({folder_name})", "success")
+                    except Exception as e:
+                        self.log(f"Photo 1 Error: {str(e)}", "error")
+                        errors.append(f"{folder_name} (Photo 1): {str(e)}")
+
+                    # Action Photo 2
+                    try:
                         if old_p2: os.remove(old_p2)
                         shutil.copy2(src_file, os.path.join(t2_dir, main_file))
-                    self.log(f"Collected: {folder_name} -> {target_rel_dir}", "success")
+                        self.log(f"Photo 2: บันทึกสำเร็จ ({folder_name})", "success")
+                    except Exception as e:
+                        self.log(f"Photo 2 Error: {str(e)}", "error")
+                        errors.append(f"{folder_name} (Photo 2): {str(e)}")
+                    
+                    success_count += 1
                 else:
-                    self.log(f"Skipped: {folder_name}", "warning")
+                    self.log(f"Skipped by user: {folder_name}", "warning")
+                    skipped_count += 1
 
-        self.log("Phase 3: Collect Photos Complete.", "success")
+        self.log("--- Phase 3: Collect Photos Finish ---", "info")
+        
+        # Final Summary Report
+        summary_msg = f"ประมวลผลเสร็จสิ้น:\n- สำเร็จ: {success_count}\n- ข้าม/ผิดพลาด: {skipped_count}"
+        if errors:
+            summary_msg += "\n\nรายการที่พบปัญหา:\n" + "\n".join(errors)
+            messagebox.showwarning("สรุปผลการทำงาน", summary_msg)
+        else:
+            messagebox.showinfo("สรุปผลการทำงาน", summary_msg)
 
     def run_phase_archive(self):
         src = self.source_dir.get()
