@@ -18,14 +18,14 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Jewelry Media Manager v1.6 (Ultimate)")
+        self.root.title("Jewelry Media Manager v1.8 (Robust Edition)")
         self.root.geometry("1150x900")
         self.root.configure(bg="#121212")
 
         # Config file path
         self.config_dir = os.path.join(os.path.expanduser("~"), ".jewelry_manager")
         if not os.path.exists(self.config_dir): os.makedirs(self.config_dir)
-        self.config_file = os.path.join(self.config_dir, "config_v1_6.json")
+        self.config_file = os.path.join(self.config_dir, "config_v1_8.json")
         self.history_log = os.path.join(self.config_dir, "history_log.txt")
 
         # Variables
@@ -45,7 +45,6 @@ class JewelryManagerApp:
         self.root.after(1000, self.auto_detect_downloads)
 
     def load_settings(self):
-        # Default Types
         default_types = {'R': 'Ring', 'N': 'Necklace', 'E': 'Earring', 'P': 'Pendant', 'B': 'Bracelet', 'S': 'Sets'}
         if os.path.exists(self.config_file):
             try:
@@ -73,25 +72,18 @@ class JewelryManagerApp:
     def log(self, message, category="info"):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_area.configure(state='normal')
-        
         tag = "info"
         prefix = "• "
-        if "สำเร็จ" in message or "เสร็จสิ้น" in message: 
-            tag = "success"; prefix = "✔ "
-        elif "ข้าม" in message or "เตือน" in message or "ไม่พบ" in message: 
-            tag = "warning"; prefix = "⚠ "
-        elif "Error" in message or "ผิดพลาด" in message: 
-            tag = "error"; prefix = "✖ "
-        elif "ตรวจพบ" in message: 
-            tag = "highlight"; prefix = "✨ "
+        if "สำเร็จ" in message or "เสร็จสิ้น" in message: tag = "success"; prefix = "✔ "
+        elif "ข้าม" in message or "เตือน" in message or "ไม่พบ" in message: tag = "warning"; prefix = "⚠ "
+        elif "Error" in message or "ผิดพลาด" in message: tag = "error"; prefix = "✖ "
+        elif "ตรวจพบ" in message: tag = "highlight"; prefix = "✨ "
         
         msg_line = f"[{timestamp}] {prefix}{message}\n"
         self.log_area.insert(tk.END, f"[{timestamp}] ", "time")
         self.log_area.insert(tk.END, f"{prefix}{message}\n", tag)
         self.log_area.configure(state='disabled')
         self.log_area.see(tk.END)
-        
-        # Save to permanent log file
         with open(self.history_log, "a", encoding="utf-8") as f:
             f.write(msg_line)
 
@@ -110,78 +102,57 @@ class JewelryManagerApp:
     def auto_detect_downloads(self):
         downloads = os.path.join(os.path.expanduser("~"), "Downloads")
         if not os.path.exists(downloads): return
-        
-        # Look for folders starting with "media -"
         candidates = [d for d in os.listdir(downloads) if os.path.isdir(os.path.join(downloads, d)) and d.lower().startswith("media -")]
         if not candidates: return
-        
-        # Sort by creation time (newest first)
         candidates.sort(key=lambda x: os.path.getctime(os.path.join(downloads, x)), reverse=True)
         newest = os.path.join(downloads, candidates[0])
-        
         if newest != self.source_dir.get():
             if messagebox.askyesno("พบโฟลเดอร์งานใหม่", f"ตรวจพบโฟลเดอร์งานล่าสุดใน Downloads:\n{candidates[0]}\n\nคุณต้องการใช้โฟลเดอร์นี้ใช่หรือไม่?"):
                 self.source_dir.set(newest)
                 self.log(f"Auto-selected newest work folder: {candidates[0]}", "highlight")
 
     def create_widgets(self):
-        # Header
         header = tk.Frame(self.root, bg="#1f1f1f", height=100)
         header.pack(fill="x")
         tk.Label(header, text="JEWELRY MEDIA MANAGER", fg="#00d1b2", bg="#1f1f1f", font=("Segoe UI", 26, "bold")).pack(pady=(20, 0))
-        tk.Label(header, text="ULTIMATE EDITION v1.6", fg="#555555", bg="#1f1f1f", font=("Segoe UI", 10, "letterspacing 2")).pack()
+        tk.Label(header, text="v1.8 - Robust Edition", fg="#555555", bg="#1f1f1f", font=("Segoe UI", 10)).pack()
 
         main_container = tk.Frame(self.root, bg="#121212", padx=30, pady=20)
         main_container.pack(expand=True, fill="both")
 
-        # Top Bar with Manage Categories Button
         top_bar = tk.Frame(main_container, bg="#121212")
         top_bar.pack(fill="x", pady=(0, 10))
         tk.Button(top_bar, text="⚙ MANAGE CATEGORIES", command=self.open_category_manager, bg="#333333", fg="#00d1b2", relief="flat", padx=15).pack(side="right")
 
-        # Layout Split
-        left_col = tk.Frame(main_container, bg="#121212")
-        left_col.pack(side="left", fill="both", expand=True, padx=(0, 15))
-        
-        right_col = tk.Frame(main_container, bg="#121212")
-        right_col.pack(side="right", fill="both", expand=True, padx=(15, 0))
+        left_col = tk.Frame(main_container, bg="#121212"); left_col.pack(side="left", fill="both", expand=True, padx=(0, 15))
+        right_col = tk.Frame(main_container, bg="#121212"); right_col.pack(side="right", fill="both", expand=True, padx=(15, 0))
 
-        # --- LEFT COLUMN ---
-        # Configuration Card
         config_box = tk.LabelFrame(left_col, text=" 🖥️ SYSTEM PATHS ", fg="#00d1b2", bg="#121212", padx=15, pady=15, font=("Segoe UI", 10, "bold"))
         config_box.pack(fill="x", pady=(0, 20))
         self.add_path_row(config_box, "Photo 1 (Main)", self.photo1_dir, True)
         self.add_path_row(config_box, "Photo 2 (Backup)", self.photo2_dir, True)
         self.add_path_row(config_box, "Archive Drive", self.archive_dir, True)
 
-        # Workspace Card
         work_box = tk.LabelFrame(left_col, text=" 📂 CURRENT WORKSPACE ", fg="#00d1b2", bg="#121212", padx=15, pady=15, font=("Segoe UI", 10, "bold"))
         work_box.pack(fill="x")
         self.source_entry = tk.Entry(work_box, textvariable=self.source_dir, font=("Consolas", 11), bg="#1f1f1f", fg="#ffffff", relief="flat", highlightthickness=1, highlightbackground="#333333", insertbackground="white")
         self.source_entry.pack(fill="x", pady=10, ipady=8)
         tk.Button(work_box, text="BROWSE FOLDER", command=lambda: self.browse_dir(self.source_dir, False), bg="#00d1b2", fg="#121212", font=("Segoe UI", 10, "bold"), relief="flat", height=2).pack(fill="x")
 
-        # --- RIGHT COLUMN ---
-        # Steps
         tk.Label(right_col, text="WORKFLOW STEPS", fg="#555555", bg="#121212", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 10))
-        
         btn_style = {"font": ("Segoe UI", 11, "bold"), "relief": "flat", "height": 2, "pady": 5}
         tk.Button(right_col, text="1. GROUP BY CODE (4 DIGITS)", command=self.run_phase_1, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
         tk.Button(right_col, text="2. RENAME FILES", command=self.run_phase_rename, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
         tk.Button(right_col, text="3. COLLECT PHOTOS", command=self.run_phase_backup, bg="#00d1b2", fg="#121212", **btn_style).pack(fill="x", pady=2)
         tk.Button(right_col, text="4. MOVE TO ARCHIVE", command=self.run_phase_archive, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
 
-        # Progress Bar
         self.progress = ttk.Progressbar(right_col, orient="horizontal", mode="determinate")
         self.progress.pack(fill="x", pady=(20, 0))
 
-        # Log Console
         tk.Label(right_col, text="ACTIVITY LOG", fg="#555555", bg="#121212", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(20, 5))
         self.log_area = scrolledtext.ScrolledText(right_col, height=18, bg="#000000", fg="#dddddd", font=("Consolas", 10), relief="flat", padx=10, pady=10)
         self.log_area.pack(fill="both", expand=True)
         self.log_area.configure(state='disabled')
-        
-        # Log Styling
         self.log_area.tag_config("time", foreground="#444444")
         self.log_area.tag_config("success", foreground="#00ffcc")
         self.log_area.tag_config("error", foreground="#ff3860")
@@ -204,90 +175,50 @@ class JewelryManagerApp:
             if is_config: self.save_settings()
 
     def open_category_manager(self):
-        manager = tk.Toplevel(self.root)
-        manager.title("Category Manager")
-        manager.geometry("500x600")
-        manager.configure(bg="#1f1f1f")
-        manager.grab_set()
-
+        manager = tk.Toplevel(self.root); manager.title("Category Manager"); manager.geometry("500x600"); manager.configure(bg="#1f1f1f"); manager.grab_set()
         tk.Label(manager, text="MANAGE PRODUCT CATEGORIES", fg="#00d1b2", bg="#1f1f1f", font=("Segoe UI", 12, "bold")).pack(pady=20)
-
-        # List Frame
-        list_frame = tk.Frame(manager, bg="#1f1f1f")
-        list_frame.pack(fill="both", expand=True, padx=20)
-        
+        list_frame = tk.Frame(manager, bg="#1f1f1f"); list_frame.pack(fill="both", expand=True, padx=20)
         tree = ttk.Treeview(list_frame, columns=("Code", "Name"), show="headings", height=15)
-        tree.heading("Code", text="Code (R, N, E...)")
-        tree.heading("Name", text="Category Name (Ring, Necklace...)")
-        tree.column("Code", width=100, anchor="center")
-        tree.pack(side="left", fill="both", expand=True)
-
-        def refresh_tree():
+        tree.heading("Code", text="Code"); tree.heading("Name", text="Category Name"); tree.column("Code", width=100, anchor="center"); tree.pack(side="left", fill="both", expand=True)
+        def refresh():
             for item in tree.get_children(): tree.delete(item)
-            for code, name in sorted(self.type_mapping.items()):
-                tree.insert("", "end", values=(code, name))
-        
-        refresh_tree()
-
-        # Controls
-        ctrl_frame = tk.Frame(manager, bg="#1f1f1f", pady=20)
-        ctrl_frame.pack(fill="x", padx=20)
-
+            for code, name in sorted(self.type_mapping.items()): tree.insert("", "end", values=(code, name))
+        refresh()
+        ctrl_frame = tk.Frame(manager, bg="#1f1f1f", pady=20); ctrl_frame.pack(fill="x", padx=20)
         tk.Label(ctrl_frame, text="Code:", bg="#1f1f1f", fg="white").grid(row=0, column=0, padx=5)
-        code_ent = tk.Entry(ctrl_frame, width=5)
-        code_ent.grid(row=0, column=1, padx=5)
-        
+        c_ent = tk.Entry(ctrl_frame, width=5); c_ent.grid(row=0, column=1, padx=5)
         tk.Label(ctrl_frame, text="Name:", bg="#1f1f1f", fg="white").grid(row=0, column=2, padx=5)
-        name_ent = tk.Entry(ctrl_frame, width=20)
-        name_ent.grid(row=0, column=3, padx=5)
-
-        def add_item():
-            c = code_ent.get().strip().upper()
-            n = name_ent.get().strip()
-            if c and n:
-                self.type_mapping[c] = n
-                self.save_settings()
-                refresh_tree()
-                code_ent.delete(0, tk.END); name_ent.delete(0, tk.END)
-            else: messagebox.showwarning("Warning", "Please fill both Code and Name")
-
-        def del_item():
+        n_ent = tk.Entry(ctrl_frame, width=20); n_ent.grid(row=0, column=3, padx=5)
+        def add():
+            c, n = c_ent.get().strip().upper(), n_ent.get().strip()
+            if c and n: self.type_mapping[c] = n; self.save_settings(); refresh(); c_ent.delete(0, tk.END); n_ent.delete(0, tk.END)
+        def delete():
             sel = tree.selection()
             if sel:
                 code = tree.item(sel[0])['values'][0]
-                if messagebox.askyesno("Confirm", f"Delete category '{code}'?"):
-                    del self.type_mapping[code]
-                    self.save_settings()
-                    refresh_tree()
+                if messagebox.askyesno("Confirm", f"Delete '{code}'?"): del self.type_mapping[code]; self.save_settings(); refresh()
+        tk.Button(ctrl_frame, text="ADD / UPDATE", command=add, bg="#00d1b2", fg="#1e1e1e", relief="flat", padx=10).grid(row=0, column=4, padx=5)
+        tk.Button(manager, text="DELETE SELECTED", command=delete, bg="#ff3860", fg="white", relief="flat", height=2).pack(fill="x", padx=20, pady=(0, 20))
 
-        tk.Button(ctrl_frame, text="ADD / UPDATE", command=add_item, bg="#00d1b2", fg="#1e1e1e", relief="flat", padx=10).grid(row=0, column=4, padx=5)
-        tk.Button(manager, text="DELETE SELECTED", command=del_item, bg="#ff3860", fg="white", relief="flat", height=2).pack(fill="x", padx=20, pady=(0, 20))
-
-    def find_fuzzy_folder(self, base_path, target_name):
-        """Search for a similar folder name if exact match fails"""
-        if not os.path.exists(base_path): return None
+    def find_fuzzy_folders(self, base_path, target_name):
+        if not os.path.exists(base_path): return []
         existing_folders = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
-        matches = difflib.get_close_matches(target_name, existing_folders, n=1, cutoff=0.8)
-        return matches[0] if matches else None
+        return difflib.get_close_matches(target_name, existing_folders, n=3, cutoff=0.7)
 
     def run_phase_1(self):
         src = self.source_dir.get()
         if not src or not os.path.exists(src): return
         files = [f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f))]
-        self.progress['maximum'] = len(files)
-        moved = 0
+        self.progress['maximum'] = len(files); moved = 0
         for i, f in enumerate(files):
             match = re.search(r'(\d{4})', f)
             if match:
-                code = match.group(1)
-                target = os.path.join(src, code)
+                code = match.group(1); target = os.path.join(src, code)
                 if not os.path.exists(target): os.makedirs(target)
-                shutil.move(os.path.join(src, f), os.path.join(target, f))
-                moved += 1
-            self.progress['value'] = i + 1
-            self.root.update_idletasks()
+                shutil.move(os.path.join(src, f), os.path.join(target, f)); moved += 1
+            self.progress['value'] = i + 1; self.root.update_idletasks()
         self.log(f"Phase 1 Complete: Grouped {moved} files.", "success")
-        messagebox.showinfo("Done", "Files grouped. Now rename folders.")
+        messagebox.showinfo("Done", "Files grouped.")
 
     def run_phase_rename(self):
         src = self.source_dir.get()
@@ -296,43 +227,60 @@ class JewelryManagerApp:
         self.progress['maximum'] = len(folders)
         for i, folder_name in enumerate(folders):
             path = os.path.join(src, folder_name)
-            files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+            files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
             if not files: continue
-            max_idx = -1
-            target_main = ""
-            file_data = []
+            
+            # Improvement 3: UI Selection for Main File
+            main_file = self.choose_main_file(path, files, folder_name)
+            if not main_file: continue
+
+            # Rename to temp
+            temp_files = []
             for f in files:
-                idx_match = re.search(r'_(\d+)\.', f)
-                idx = int(idx_match.group(1)) if idx_match else -1
-                file_data.append((idx, f))
-                if idx > max_idx: max_idx = idx; target_main = f
-            if not target_main: target_main = files[-1]
-            temp_list = []
-            for idx, f in file_data:
-                ext = os.path.splitext(f)[1]; temp = f"temp_{f}"
-                os.rename(os.path.join(path, f), os.path.join(path, temp))
-                temp_list.append((idx, temp, ext))
+                temp = f"temp_{f}"; os.rename(os.path.join(path, f), os.path.join(path, temp)); temp_files.append(temp)
+            
+            # Rename to final
             counter = 2
-            for idx, temp, ext in temp_list:
-                if (max_idx != -1 and idx == max_idx) or (max_idx == -1 and temp == f"temp_{target_main}"):
-                    final = f"{folder_name}{ext}"
+            for temp in temp_files:
+                ext = os.path.splitext(temp)[1]
+                if temp == f"temp_{main_file}": final = f"{folder_name}{ext}"
                 else: final = f"{folder_name}-{counter}{ext}"; counter += 1
                 os.rename(os.path.join(path, temp), os.path.join(path, final))
-            self.progress['value'] = i + 1
-            self.root.update_idletasks()
+            
+            self.progress['value'] = i + 1; self.root.update_idletasks()
         self.log("Phase 2 Complete: Files renamed.", "success")
 
-    def run_phase_backup(self):
-        src = self.source_dir.get()
-        p1 = self.photo1_dir.get()
-        p2 = self.photo2_dir.get()
-        if not all([src, p1, p2]): return
+    def choose_main_file(self, folder_path, files, folder_name):
+        # Auto-detect max index first
+        max_idx = -1; suggested = files[-1]
+        for f in files:
+            m = re.search(r'_(\d+)\.', f)
+            if m and int(m.group(1)) > max_idx: max_idx = int(m.group(1)); suggested = f
+        
+        # Simple selection dialog if more than 1 file
+        if len(files) <= 1: return files[0]
+        
+        win = tk.Toplevel(self.root); win.title(f"Select Main File for {folder_name}"); win.geometry("600x400"); win.grab_set()
+        choice = tk.StringVar(value=suggested)
+        tk.Label(win, text=f"Choose primary photo for {folder_name}:", bg="#1f1f1f", fg="white", pady=10).pack()
+        lb = tk.Listbox(win, font=("Consolas", 10), bg="#000000", fg="#ffffff", selectbackground="#00d1b2")
+        lb.pack(expand=True, fill="both", padx=20, pady=10)
+        for f in files: lb.insert(tk.END, f)
+        lb.select_set(files.index(suggested))
+        def ok(): choice.set(lb.get(lb.curselection())); win.destroy()
+        tk.Button(win, text="CONFIRM SELECTION", command=ok, bg="#00d1b2", relief="flat", height=2).pack(fill="x", padx=20, pady=10)
+        self.root.wait_window(win); return choice.get()
 
+    def get_range(self, num):
+        start = ((num - 1) // 200) * 200 + 1
+        return f"{start}-{start+199}"
+
+    def run_phase_backup(self):
+        src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
+        if not all([src, p1, p2]): return
         self.log("--- Starting Phase 3: Collect Photos ---", "info")
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
-        self.progress['maximum'] = len(folders)
-        
-        errors = []; success_count = 0; skipped_count = 0
+        self.progress['maximum'] = len(folders); errors = []; success_count = 0; skipped_count = 0
         
         for i, folder_name in enumerate(folders):
             folder_path = os.path.join(src, folder_name)
@@ -341,104 +289,79 @@ class JewelryManagerApp:
                 if os.path.splitext(f)[0] == folder_name: main_file = f; break
             
             if main_file:
-                type_code = folder_name[0].upper()
-                p_type = self.type_mapping.get(type_code, "Other")
-                
-                if "-VN-" in folder_name.upper():
-                    target_rel_dir = os.path.join("Vincentio", p_type)
+                p_type = self.type_mapping.get(folder_name[0].upper(), "Other")
+                if "-VN-" in folder_name.upper(): target_rel_dir = os.path.join("Vincentio", p_type)
                 else:
                     num_match = re.search(r'(\d+)', folder_name)
-                    if num_match:
-                        num = int(num_match.group(1))
-                        target_rel_dir = os.path.join(p_type, f"{p_type} {self.get_range(num)}")
-                    else: target_rel_dir = os.path.join(p_type, "Unknown")
+                    range_str = self.get_range(int(num_match.group(1))) if num_match else "Unknown"
+                    target_rel_dir = os.path.join(p_type, f"{p_type} {range_str}")
                 
-                t1_dir = os.path.join(p1, target_rel_dir)
-                t2_dir = os.path.join(p2, target_rel_dir)
+                t1_dir = os.path.join(p1, target_rel_dir); t2_dir = os.path.join(p2, target_rel_dir)
                 
-                # Fuzzy Search Logic
+                # Fuzzy Match Improvement
                 if not os.path.exists(t1_dir):
-                    parent_path = os.path.dirname(t1_dir)
-                    fuzzy_match = self.find_fuzzy_folder(parent_path, os.path.basename(t1_dir))
-                    if fuzzy_match:
-                        if messagebox.askyesno("ไม่พบชื่อโฟลเดอร์ตรงเป๊ะ", f"ไม่พบโฟลเดอร์: {os.path.basename(t1_dir)}\nแต่พบชื่อใกล้เคียง: {fuzzy_match}\n\nคุณต้องการใช้โฟลเดอร์นี้แทนหรือไม่?"):
-                            t1_dir = os.path.join(parent_path, fuzzy_match)
-                            t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(t1_dir), fuzzy_match))
-                            p1_exists = True
-                        else: p1_exists = False
-                    else: p1_exists = False
-                else: p1_exists = True
-
-                if not p1_exists:
-                    msg = f"รหัส {folder_name}: ไม่พบโฟลเดอร์ปลายทางใน Photo 1"
-                    self.log(msg, "error"); errors.append(msg); skipped_count += 1
-                    continue
-
-                # ค้นหาไฟล์เดิม (พิจารณา S00/SC0 ว่าเป็นรหัสเดียวกัน)
-                # เช่น ถ้ากำลังจะลง S00 ให้หาทั้ง S00 และ SC0 เผื่อมีอันเก่าอยู่
-                base_code = folder_name
-                alt_code = None
-                if "-S00" in folder_name.upper():
-                    alt_code = folder_name.upper().replace("-S00", "-SC0")
-                elif "-SC0" in folder_name.upper():
-                    alt_code = folder_name.upper().replace("-SC0", "-S00")
-
-                old_p1 = None
-                for f in os.listdir(t1_dir):
-                    f_name_wo_ext = os.path.splitext(f)[0].upper()
-                    if f_name_wo_ext == base_code.upper() or (alt_code and f_name_wo_ext == alt_code):
-                        old_p1 = os.path.join(t1_dir, f)
-                        if f_name_wo_ext == alt_code:
-                            self.log(f"ตรวจพบรหัสคู่ขนาน: พบ {f_name_wo_ext} ในระบบ (กำลังจะแทนที่ด้วย {base_code})", "highlight")
-                        break
+                    matches = self.find_fuzzy_folders(os.path.dirname(t1_dir), os.path.basename(t1_dir))
+                    if matches:
+                        match_win = tk.Toplevel(self.root); match_win.title("Fuzzy Match Selection"); match_win.geometry("400x300"); match_win.grab_set()
+                        selected_match = tk.StringVar(value=matches[0])
+                        tk.Label(match_win, text=f"Folder not found: {os.path.basename(t1_dir)}\nChoose best match:").pack(pady=10)
+                        for m in matches: tk.Radiobutton(match_win, text=m, variable=selected_match, value=m).pack(anchor="w", padx=50)
+                        def confirm_match(): match_win.destroy()
+                        tk.Button(match_win, text="USE SELECTED", command=confirm_match).pack(pady=10)
+                        self.root.wait_window(match_win)
+                        t1_dir = os.path.join(os.path.dirname(t1_dir), selected_match.get())
+                        t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(t1_dir), selected_match.get()))
                 
-                old_p2 = None
-                if os.path.exists(t2_dir):
-                    for f in os.listdir(t2_dir):
-                        f_name_wo_ext = os.path.splitext(f)[0].upper()
-                        if f_name_wo_ext == base_code.upper() or (alt_code and f_name_wo_ext == alt_code):
-                            old_p2 = os.path.join(t2_dir, f)
-                            break
+                if not os.path.exists(t1_dir):
+                    msg = f"{folder_name}: [Photo 1 Folder Missing]"; self.log(msg, "error"); errors.append(msg); skipped_count += 1; continue
 
-                src_file = os.path.join(folder_path, main_file)
-                if self.show_preview(old_p1, old_p2, src_file, target_rel_dir):
+                # Clean-up All Suffixes Logic
+                base_code = folder_name.upper()
+                alt_suffix = "-SC0" if "-S00" in base_code else "-S00" if "-SC0" in base_code else None
+                alt_code = base_code.replace("-S00", "-SC0") if "-S00" in base_code else base_code.replace("-SC0", "-S00") if "-SC0" in base_code else None
+
+                old_files_p1 = [os.path.join(t1_dir, f) for f in os.listdir(t1_dir) if os.path.splitext(f)[0].upper() in [base_code, alt_code]]
+                old_files_p2 = [os.path.join(t2_dir, f) for f in os.listdir(t2_dir) if os.path.exists(t2_dir) and os.path.splitext(f)[0].upper() in [base_code, alt_code]]
+
+                if self.show_preview(old_files_p1[0] if old_files_p1 else None, old_files_p2[0] if old_files_p2 else None, os.path.join(folder_path, main_file), target_rel_dir):
                     try:
-                        if old_p1: os.remove(old_p1)
-                        shutil.copy2(src_file, os.path.join(t1_dir, main_file))
+                        for f in old_files_p1: os.remove(f)
+                        shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t1_dir, main_file))
                         if os.path.exists(t2_dir):
-                            if old_p2: os.remove(old_p2)
-                            shutil.copy2(src_file, os.path.join(t2_dir, main_file))
-                        success_count += 1
-                        self.log(f"Success: {folder_name}", "success")
+                            for f in old_files_p2: os.remove(f)
+                            shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t2_dir, main_file))
+                        success_count += 1; self.log(f"Success: {folder_name}", "success")
                     except Exception as e:
                         self.log(f"Error {folder_name}: {str(e)}", "error"); errors.append(f"{folder_name}: {str(e)}")
                 else: skipped_count += 1
-            
-            self.progress['value'] = i + 1
-            self.root.update_idletasks()
-
+            self.progress['value'] = i + 1; self.root.update_idletasks()
+        
         summary = f"Results:\n- Success: {success_count}\n- Skipped/Error: {skipped_count}"
         if errors: messagebox.showwarning("Summary", summary + "\n\nErrors:\n" + "\n".join(errors))
         else: messagebox.showinfo("Summary", summary)
 
     def run_phase_archive(self):
-        src = self.source_dir.get()
-        arc = self.archive_dir.get()
+        src, arc = self.source_dir.get(), self.archive_dir.get()
         if not all([src, arc]): return
+        self.log("--- Starting Phase 4: Archive ---", "info")
         now = datetime.now()
-        path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
-        if not os.path.exists(path): os.makedirs(path)
+        archive_path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
+        if not os.path.exists(archive_path): os.makedirs(archive_path)
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
-        for f in folders: shutil.move(os.path.join(src, f), os.path.join(path, f))
-        self.log("Phase 4 Complete: Moved to Archive.", "success")
-        messagebox.showinfo("Done", "Archived.")
+        self.progress['maximum'] = len(folders)
+        for i, folder_name in enumerate(folders):
+            src_p = os.path.join(src, folder_name); dst_p = os.path.join(archive_path, folder_name)
+            if os.path.exists(dst_p): dst_p = f"{dst_p}_{datetime.now().strftime('%H%M%S')}"
+            try: shutil.move(src_p, dst_p); self.log(f"Archived: {folder_name}")
+            except Exception as e: self.log(f"Error: {str(e)}", "error")
+            self.progress['value'] = i + 1; self.root.update_idletasks()
+        self.log("Archive Complete.", "success"); messagebox.showinfo("Done", "Archived.")
 
     def show_preview(self, p1, p2, new, dest):
         dialog = tk.Toplevel(self.root); dialog.title("Preview"); dialog.geometry("1000x700"); dialog.configure(bg="#121212"); dialog.grab_set()
         res = tk.BooleanVar(value=False)
-        tk.Label(dialog, text=f"DESTINATION: {dest}", fg="#00ffcc", bg="#1e1e1e", pady=10).pack(fill="x")
+        tk.Label(dialog, text=f"DESTINATION: {dest}", fg="#00ffcc", bg="#1e1e1e", pady=10, font=("Consolas", 10)).pack(fill="x")
         grid = tk.Frame(dialog, bg="#121212", padx=20, pady=20); grid.pack(expand=True, fill="both")
-        
         def add_box(parent, p, title):
             box = tk.Frame(parent, bg="#121212"); box.pack(side="left", expand=True, fill="both")
             tk.Label(box, text=title, fg="#888888", bg="#121212", font=("Segoe UI", 10, "bold")).pack(pady=5)
@@ -447,9 +370,7 @@ class JewelryManagerApp:
                 l = tk.Label(box, image=ph, bg="#1e1e1e"); l.image = ph; l.pack()
                 tk.Label(box, text=os.path.basename(p), fg="#444444", bg="#121212", font=("Arial", 8)).pack()
             else: tk.Label(box, text="[ NOT FOUND ]", fg="#333333", bg="#121212", font=("Segoe UI", 12, "bold")).pack(pady=120)
-
         add_box(grid, p1, "PHOTO 1"); add_box(grid, p2, "PHOTO 2"); add_box(grid, new, "NEW FILE")
-        
         btn_f = tk.Frame(dialog, bg="#1e1e1e", pady=20); btn_f.pack(side="bottom", fill="x")
         tk.Button(btn_f, text="REPLACE PHOTOS", bg="#00d1b2", fg="#121212", font=("Segoe UI", 12, "bold"), width=25, height=2, command=lambda: [res.set(True), dialog.destroy()]).pack(side="left", padx=50)
         tk.Button(btn_f, text="SKIP", bg="#333333", fg="white", width=20, height=2, command=dialog.destroy).pack(side="right", padx=50)
