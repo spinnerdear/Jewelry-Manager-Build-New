@@ -26,7 +26,7 @@ class JewelryManagerApp:
         self.type_mapping = {
             'R': 'Ring',
             'N': 'Necklace',
-            'E': 'Earrings',
+            'E': 'Earring',
             'P': 'Pendant',
             'B': 'Bracelet',
             'S': 'Sets'
