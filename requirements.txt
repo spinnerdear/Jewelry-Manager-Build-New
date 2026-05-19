@@ -1,1 +1,1 @@
-Pillow\npyinstaller
+Pillow\npyinstaller\ntkinterdnd2
