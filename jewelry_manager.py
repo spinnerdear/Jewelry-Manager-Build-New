@@ -374,15 +374,31 @@ class JewelryManagerApp:
                     self.log(msg, "error"); errors.append(msg); skipped_count += 1
                     continue
 
-                # Preview Logic (Checks for existing files regardless of extension)
+                # ค้นหาไฟล์เดิม (พิจารณา S00/SC0 ว่าเป็นรหัสเดียวกัน)
+                # เช่น ถ้ากำลังจะลง S00 ให้หาทั้ง S00 และ SC0 เผื่อมีอันเก่าอยู่
+                base_code = folder_name
+                alt_code = None
+                if "-S00" in folder_name.upper():
+                    alt_code = folder_name.upper().replace("-S00", "-SC0")
+                elif "-SC0" in folder_name.upper():
+                    alt_code = folder_name.upper().replace("-SC0", "-S00")
+
                 old_p1 = None
                 for f in os.listdir(t1_dir):
-                    if os.path.splitext(f)[0] == folder_name: old_p1 = os.path.join(t1_dir, f); break
+                    f_name_wo_ext = os.path.splitext(f)[0].upper()
+                    if f_name_wo_ext == base_code.upper() or (alt_code and f_name_wo_ext == alt_code):
+                        old_p1 = os.path.join(t1_dir, f)
+                        if f_name_wo_ext == alt_code:
+                            self.log(f"ตรวจพบรหัสคู่ขนาน: พบ {f_name_wo_ext} ในระบบ (กำลังจะแทนที่ด้วย {base_code})", "highlight")
+                        break
                 
                 old_p2 = None
                 if os.path.exists(t2_dir):
                     for f in os.listdir(t2_dir):
-                        if os.path.splitext(f)[0] == folder_name: old_p2 = os.path.join(t2_dir, f); break
+                        f_name_wo_ext = os.path.splitext(f)[0].upper()
+                        if f_name_wo_ext == base_code.upper() or (alt_code and f_name_wo_ext == alt_code):
+                            old_p2 = os.path.join(t2_dir, f)
+                            break
 
                 src_file = os.path.join(folder_path, main_file)
                 if self.show_preview(old_p1, old_p2, src_file, target_rel_dir):
