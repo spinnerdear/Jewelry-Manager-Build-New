@@ -218,15 +218,15 @@ class JewelryManagerApp:
                     target_rel_dir = os.path.join("Vincentio", p_type)
                     self.log(f"ตรวจพบรหัส VN: จะเก็บไว้ในโฟลเดอร์ Vincentio/{p_type} โดยตรง")
                 else:
-                    # สำหรับสินค้าปกติ: [Type]/[Range]/[FileName]
+                    # สำหรับสินค้าปกติ: [Type]/[Type] [Range]/[FileName]
                     num_match = re.search(r'(\d+)', folder_name)
                     if num_match:
                         num = int(num_match.group(1))
                         range_folder = self.get_range(num)
-                        target_rel_dir = os.path.join(p_type, range_folder)
+                        target_rel_dir = os.path.join(p_type, f"{p_type} {range_folder}")
                     else:
                         target_rel_dir = os.path.join(p_type, "Unknown")
-                    self.log(f"สินค้าปกติ: จะเก็บไว้ในโฟลเดอร์ {p_type}/{target_rel_dir} โดยตรง")
+                    self.log(f"สินค้าปกติ: จะเก็บไว้ในโฟลเดอร์ {target_rel_dir} โดยตรง")
                 
                 target1 = os.path.join(p1, target_rel_dir)
                 target2 = os.path.join(p2, target_rel_dir)
