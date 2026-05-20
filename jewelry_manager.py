@@ -18,14 +18,15 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("Jewelry Media Manager v1.8 (Robust Edition)")
-        self.root.geometry("1150x900")
+        self.version = "1.9"
+        self.root.title(f"Jewelry Media Manager v{self.version}")
+        self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
 
         # Config file path
         self.config_dir = os.path.join(os.path.expanduser("~"), ".jewelry_manager")
         if not os.path.exists(self.config_dir): os.makedirs(self.config_dir)
-        self.config_file = os.path.join(self.config_dir, "config_v1_8.json")
+        self.config_file = os.path.join(self.config_dir, "config_v1_9.json")
         self.history_log = os.path.join(self.config_dir, "history_log.txt")
 
         # Variables
@@ -35,13 +36,28 @@ class JewelryManagerApp:
         self.archive_dir = tk.StringVar()
         self.type_mapping = {}
 
+        # Colors
+        self.colors = {
+            "bg": "#121212",
+            "card": "#1e1e1e",
+            "accent": "#00d1b2",
+            "accent_hover": "#00f2d3",
+            "text": "#ffffff",
+            "text_dim": "#888888",
+            "btn_default": "#333333",
+            "btn_hover": "#444444",
+            "success": "#00ffcc",
+            "error": "#ff3860",
+            "warning": "#ffdd57",
+            "highlight": "#209cee"
+        }
+
         self.load_settings()
         self.create_widgets()
         
         if HAS_DND:
             self.setup_dnd()
         
-        # Auto-detect Downloads
         self.root.after(1000, self.auto_detect_downloads)
 
     def load_settings(self):
@@ -54,38 +70,29 @@ class JewelryManagerApp:
                     self.photo2_dir.set(data.get('photo2', ''))
                     self.archive_dir.set(data.get('archive', ''))
                     self.type_mapping = data.get('types', default_types)
-            except: 
-                self.type_mapping = default_types
-        else:
-            self.type_mapping = default_types
+            except: self.type_mapping = default_types
+        else: self.type_mapping = default_types
 
     def save_settings(self):
-        data = {
-            'photo1': self.photo1_dir.get(),
-            'photo2': self.photo2_dir.get(),
-            'archive': self.archive_dir.get(),
-            'types': self.type_mapping
-        }
+        data = {'photo1': self.photo1_dir.get(), 'photo2': self.photo2_dir.get(), 'archive': self.archive_dir.get(), 'types': self.type_mapping}
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
     def log(self, message, category="info"):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_area.configure(state='normal')
-        tag = "info"
-        prefix = "• "
-        if "สำเร็จ" in message or "เสร็จสิ้น" in message: tag = "success"; prefix = "✔ "
-        elif "ข้าม" in message or "เตือน" in message or "ไม่พบ" in message: tag = "warning"; prefix = "⚠ "
+        tag = "info"; prefix = "• "
+        if "สำเร็จ" in message or "Success" in message: tag = "success"; prefix = "✔ "
+        elif "ข้าม" in message or "Skipped" in message or "ไม่พบ" in message: tag = "warning"; prefix = "⚠ "
         elif "Error" in message or "ผิดพลาด" in message: tag = "error"; prefix = "✖ "
-        elif "ตรวจพบ" in message: tag = "highlight"; prefix = "✨ "
+        elif "ตรวจพบ" in message or "Highlight" in message: tag = "highlight"; prefix = "✨ "
         
         msg_line = f"[{timestamp}] {prefix}{message}\n"
         self.log_area.insert(tk.END, f"[{timestamp}] ", "time")
         self.log_area.insert(tk.END, f"{prefix}{message}\n", tag)
         self.log_area.configure(state='disabled')
         self.log_area.see(tk.END)
-        with open(self.history_log, "a", encoding="utf-8") as f:
-            f.write(msg_line)
+        with open(self.history_log, "a", encoding="utf-8") as f: f.write(msg_line)
 
     def setup_dnd(self):
         self.source_entry.drop_target_register(DND_FILES)
@@ -96,8 +103,7 @@ class JewelryManagerApp:
         if os.path.isdir(path):
             self.source_dir.set(os.path.normpath(path))
             self.log(f"Drag & Drop Success: {path}", "success")
-        else:
-            self.log("Please drag a folder, not a file.", "error")
+        else: self.log("Please drag a folder.", "error")
 
     def auto_detect_downloads(self):
         downloads = os.path.join(os.path.expanduser("~"), "Downloads")
@@ -107,118 +113,129 @@ class JewelryManagerApp:
         candidates.sort(key=lambda x: os.path.getctime(os.path.join(downloads, x)), reverse=True)
         newest = os.path.join(downloads, candidates[0])
         if newest != self.source_dir.get():
-            if messagebox.askyesno("พบโฟลเดอร์งานใหม่", f"ตรวจพบโฟลเดอร์งานล่าสุดใน Downloads:\n{candidates[0]}\n\nคุณต้องการใช้โฟลเดอร์นี้ใช่หรือไม่?"):
+            if messagebox.askyesno("New Folder Detected", f"Use latest folder in Downloads?\n{candidates[0]}"):
                 self.source_dir.set(newest)
-                self.log(f"Auto-selected newest work folder: {candidates[0]}", "highlight")
+                self.log(f"Auto-selected: {candidates[0]}", "highlight")
 
     def create_widgets(self):
-        header = tk.Frame(self.root, bg="#1f1f1f", height=100)
+        # Header
+        header = tk.Frame(self.root, bg="#1a1a1f", height=120)
         header.pack(fill="x")
-        tk.Label(header, text="JEWELRY MEDIA MANAGER", fg="#00d1b2", bg="#1f1f1f", font=("Segoe UI", 26, "bold")).pack(pady=(20, 0))
-        tk.Label(header, text="v1.8 - Robust Edition", fg="#555555", bg="#1f1f1f", font=("Segoe UI", 10)).pack()
+        tk.Label(header, text="JEWELRY MEDIA MANAGER", fg=self.colors["accent"], bg="#1a1a1f", font=("Segoe UI", 28, "bold")).pack(pady=(25, 0))
+        tk.Label(header, text=f"PROFESSIONAL VERSION {self.version}", fg=self.colors["text_dim"], bg="#1a1a1f", font=("Segoe UI", 10)).pack()
 
-        main_container = tk.Frame(self.root, bg="#121212", padx=30, pady=20)
+        main_container = tk.Frame(self.root, bg=self.colors["bg"], padx=40, pady=30)
         main_container.pack(expand=True, fill="both")
 
-        top_bar = tk.Frame(main_container, bg="#121212")
-        top_bar.pack(fill="x", pady=(0, 10))
-        tk.Button(top_bar, text="⚙ MANAGE CATEGORIES", command=self.open_category_manager, bg="#333333", fg="#00d1b2", relief="flat", padx=15).pack(side="right")
+        # Sidebar & Content Split
+        left_side = tk.Frame(main_container, bg=self.colors["bg"])
+        left_side.pack(side="left", fill="both", expand=True, padx=(0, 20))
+        right_side = tk.Frame(main_container, bg=self.colors["bg"])
+        right_side.pack(side="right", fill="both", expand=True, padx=(20, 0))
 
-        left_col = tk.Frame(main_container, bg="#121212"); left_col.pack(side="left", fill="both", expand=True, padx=(0, 15))
-        right_col = tk.Frame(main_container, bg="#121212"); right_col.pack(side="right", fill="both", expand=True, padx=(15, 0))
+        # --- LEFT SIDE: CONFIGURATION ---
+        tk.Label(left_side, text="CONFIGURATION", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 15))
+        
+        # Path Cards
+        self.add_path_card(left_side, "PHOTO 1 (MAIN DATABASE)", self.photo1_dir, True)
+        self.add_path_card(left_side, "PHOTO 2 (BACKUP DATABASE)", self.photo2_dir, True)
+        self.add_path_card(left_side, "ARCHIVE DRIVE", self.archive_dir, True)
+        
+        # Categories Button
+        cat_btn = self.create_styled_button(left_side, "⚙ MANAGE CATEGORIES", self.open_category_manager, self.colors["btn_default"], self.colors["accent"])
+        cat_btn.pack(fill="x", pady=20)
 
-        config_box = tk.LabelFrame(left_col, text=" 🖥️ SYSTEM PATHS ", fg="#00d1b2", bg="#121212", padx=15, pady=15, font=("Segoe UI", 10, "bold"))
-        config_box.pack(fill="x", pady=(0, 20))
-        self.add_path_row(config_box, "Photo 1 (Main)", self.photo1_dir, True)
-        self.add_path_row(config_box, "Photo 2 (Backup)", self.photo2_dir, True)
-        self.add_path_row(config_box, "Archive Drive", self.archive_dir, True)
+        # Workspace Card
+        tk.Label(left_side, text="WORKSPACE", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(10, 15))
+        work_frame = tk.Frame(left_side, bg=self.colors["card"], padx=20, pady=20, highlightthickness=1, highlightbackground="#333333")
+        work_frame.pack(fill="x")
+        self.source_entry = tk.Entry(work_frame, textvariable=self.source_dir, font=("Consolas", 11), bg="#121212", fg="#ffffff", relief="flat", highlightthickness=1, highlightbackground="#444444", insertbackground="white")
+        self.source_entry.pack(fill="x", pady=(0, 15), ipady=10)
+        self.create_styled_button(work_frame, "BROWSE FOLDER", lambda: self.browse_dir(self.source_dir, False), self.colors["accent"], "#121212").pack(fill="x")
 
-        work_box = tk.LabelFrame(left_col, text=" 📂 CURRENT WORKSPACE ", fg="#00d1b2", bg="#121212", padx=15, pady=15, font=("Segoe UI", 10, "bold"))
-        work_box.pack(fill="x")
-        self.source_entry = tk.Entry(work_box, textvariable=self.source_dir, font=("Consolas", 11), bg="#1f1f1f", fg="#ffffff", relief="flat", highlightthickness=1, highlightbackground="#333333", insertbackground="white")
-        self.source_entry.pack(fill="x", pady=10, ipady=8)
-        tk.Button(work_box, text="BROWSE FOLDER", command=lambda: self.browse_dir(self.source_dir, False), bg="#00d1b2", fg="#121212", font=("Segoe UI", 10, "bold"), relief="flat", height=2).pack(fill="x")
+        # --- RIGHT SIDE: STEPS & LOGS ---
+        tk.Label(right_side, text="WORKFLOW PROGRESS", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 10))
+        
+        self.create_styled_button(right_side, "1. GROUP BY CODE (4 DIGITS)", self.run_phase_1, "#2d2d2d", "white").pack(fill="x", pady=4)
+        self.create_styled_button(right_side, "2. RENAME FILES", self.run_phase_rename, "#2d2d2d", "white").pack(fill="x", pady=4)
+        self.create_styled_button(right_side, "3. COLLECT PHOTOS", self.run_phase_backup, "#2d2d2d", "white").pack(fill="x", pady=4)
+        self.create_styled_button(right_side, "4. MOVE TO ARCHIVE", self.run_phase_archive, "#2d2d2d", "white").pack(fill="x", pady=4)
 
-        tk.Label(right_col, text="WORKFLOW STEPS", fg="#555555", bg="#121212", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 10))
-        btn_style = {"font": ("Segoe UI", 11, "bold"), "relief": "flat", "height": 2, "pady": 5}
-        tk.Button(right_col, text="1. GROUP BY CODE (4 DIGITS)", command=self.run_phase_1, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
-        tk.Button(right_col, text="2. RENAME FILES", command=self.run_phase_rename, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
-        tk.Button(right_col, text="3. COLLECT PHOTOS", command=self.run_phase_backup, bg="#00d1b2", fg="#121212", **btn_style).pack(fill="x", pady=2)
-        tk.Button(right_col, text="4. MOVE TO ARCHIVE", command=self.run_phase_archive, bg="#2d2d2d", fg="white", **btn_style).pack(fill="x", pady=2)
-
-        self.progress = ttk.Progressbar(right_col, orient="horizontal", mode="determinate")
+        self.progress = ttk.Progressbar(right_side, orient="horizontal", mode="determinate")
         self.progress.pack(fill="x", pady=(20, 0))
 
-        tk.Label(right_col, text="ACTIVITY LOG", fg="#555555", bg="#121212", font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(20, 5))
-        self.log_area = scrolledtext.ScrolledText(right_col, height=18, bg="#000000", fg="#dddddd", font=("Consolas", 10), relief="flat", padx=10, pady=10)
+        tk.Label(right_side, text="ACTIVITY LOG", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(25, 5))
+        self.log_area = scrolledtext.ScrolledText(right_side, height=20, bg="#000000", fg="#dddddd", font=("Consolas", 10), relief="flat", padx=15, pady=15)
         self.log_area.pack(fill="both", expand=True)
         self.log_area.configure(state='disabled')
         self.log_area.tag_config("time", foreground="#444444")
-        self.log_area.tag_config("success", foreground="#00ffcc")
-        self.log_area.tag_config("error", foreground="#ff3860")
-        self.log_area.tag_config("warning", foreground="#ffdd57")
-        self.log_area.tag_config("highlight", foreground="#209cee")
+        self.log_area.tag_config("success", foreground=self.colors["success"])
+        self.log_area.tag_config("error", foreground=self.colors["error"])
+        self.log_area.tag_config("warning", foreground=self.colors["warning"])
+        self.log_area.tag_config("highlight", foreground=self.colors["highlight"])
         self.log_area.tag_config("info", foreground="#ffffff")
 
-    def add_path_row(self, parent, label_text, var, is_config):
-        row = tk.Frame(parent, bg="#121212")
-        row.pack(fill="x", pady=5)
-        tk.Label(row, text=label_text, width=15, anchor="w", bg="#121212", fg="#888888", font=("Segoe UI", 8, "bold")).pack(side="left")
-        entry = tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#1f1f1f", fg="#ffffff", relief="flat", insertbackground="white")
-        entry.pack(side="left", expand=True, fill="x", padx=10, ipady=4)
-        tk.Button(row, text="...", command=lambda: self.browse_dir(var, is_config), bg="#333333", fg="white", relief="flat", font=("Arial", 10, "bold"), padx=10).pack(side="right")
+    def create_styled_button(self, parent, text, cmd, bg_color, fg_color):
+        btn = tk.Button(parent, text=text, command=cmd, bg=bg_color, fg=fg_color, font=("Segoe UI", 10, "bold"), relief="flat", height=2)
+        def on_enter(e): 
+            if bg_color == self.colors["accent"]: btn.config(bg=self.colors["accent_hover"])
+            else: btn.config(bg=self.colors["btn_hover"])
+        def on_leave(e): btn.config(bg=bg_color)
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+        return btn
+
+    def add_path_card(self, parent, label, var, is_config):
+        card = tk.Frame(parent, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#333333")
+        card.pack(fill="x", pady=5)
+        tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        row = tk.Frame(card, bg=self.colors["card"])
+        row.pack(fill="x", pady=(5, 0))
+        tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#121212", fg="#ffffff", relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
+        tk.Button(row, text="...", command=lambda: self.browse_dir(var, is_config), bg="#333333", fg="white", relief="flat", width=4).pack(side="right", padx=(5, 0))
 
     def browse_dir(self, var, is_config):
-        directory = filedialog.askdirectory()
-        if directory:
-            var.set(os.path.normpath(directory))
+        d = filedialog.askdirectory()
+        if d:
+            var.set(os.path.normpath(d))
             if is_config: self.save_settings()
 
     def open_category_manager(self):
-        manager = tk.Toplevel(self.root); manager.title("Category Manager"); manager.geometry("500x600"); manager.configure(bg="#1f1f1f"); manager.grab_set()
-        tk.Label(manager, text="MANAGE PRODUCT CATEGORIES", fg="#00d1b2", bg="#1f1f1f", font=("Segoe UI", 12, "bold")).pack(pady=20)
-        list_frame = tk.Frame(manager, bg="#1f1f1f"); list_frame.pack(fill="both", expand=True, padx=20)
-        tree = ttk.Treeview(list_frame, columns=("Code", "Name"), show="headings", height=15)
-        tree.heading("Code", text="Code"); tree.heading("Name", text="Category Name"); tree.column("Code", width=100, anchor="center"); tree.pack(side="left", fill="both", expand=True)
+        manager = tk.Toplevel(self.root); manager.title("Category Manager"); manager.geometry("500x650"); manager.configure(bg="#1a1a1f"); manager.grab_set()
+        tk.Label(manager, text="MANAGE CATEGORIES", fg=self.colors["accent"], bg="#1a1a1f", font=("Segoe UI", 14, "bold")).pack(pady=20)
+        tree = ttk.Treeview(manager, columns=("Code", "Name"), show="headings", height=15); tree.heading("Code", text="Code"); tree.heading("Name", text="Name"); tree.pack(padx=20, fill="both", expand=True)
         def refresh():
-            for item in tree.get_children(): tree.delete(item)
-            for code, name in sorted(self.type_mapping.items()): tree.insert("", "end", values=(code, name))
+            for i in tree.get_children(): tree.delete(i)
+            for c, n in sorted(self.type_mapping.items()): tree.insert("", "end", values=(c, n))
         refresh()
-        ctrl_frame = tk.Frame(manager, bg="#1f1f1f", pady=20); ctrl_frame.pack(fill="x", padx=20)
-        tk.Label(ctrl_frame, text="Code:", bg="#1f1f1f", fg="white").grid(row=0, column=0, padx=5)
-        c_ent = tk.Entry(ctrl_frame, width=5); c_ent.grid(row=0, column=1, padx=5)
-        tk.Label(ctrl_frame, text="Name:", bg="#1f1f1f", fg="white").grid(row=0, column=2, padx=5)
-        n_ent = tk.Entry(ctrl_frame, width=20); n_ent.grid(row=0, column=3, padx=5)
+        ctrl = tk.Frame(manager, bg="#1a1a1f", pady=10); ctrl.pack(fill="x", padx=20)
+        tk.Label(ctrl, text="CODE:", bg="#1a1a1f", fg="white").grid(row=0, column=0); c_ent = tk.Entry(ctrl, width=5); c_ent.grid(row=0, column=1, padx=5)
+        tk.Label(ctrl, text="NAME:", bg="#1a1a1f", fg="white").grid(row=0, column=2); n_ent = tk.Entry(ctrl, width=15); n_ent.grid(row=0, column=3, padx=5)
         def add():
             c, n = c_ent.get().strip().upper(), n_ent.get().strip()
             if c and n: self.type_mapping[c] = n; self.save_settings(); refresh(); c_ent.delete(0, tk.END); n_ent.delete(0, tk.END)
+        self.create_styled_button(ctrl, "ADD", add, self.colors["accent"], "#121212").grid(row=0, column=4)
         def delete():
-            sel = tree.selection()
-            if sel:
-                code = tree.item(sel[0])['values'][0]
+            s = tree.selection()
+            if s:
+                code = tree.item(s[0])['values'][0]
                 if messagebox.askyesno("Confirm", f"Delete '{code}'?"): del self.type_mapping[code]; self.save_settings(); refresh()
-        tk.Button(ctrl_frame, text="ADD / UPDATE", command=add, bg="#00d1b2", fg="#1e1e1e", relief="flat", padx=10).grid(row=0, column=4, padx=5)
-        tk.Button(manager, text="DELETE SELECTED", command=delete, bg="#ff3860", fg="white", relief="flat", height=2).pack(fill="x", padx=20, pady=(0, 20))
-
-    def find_fuzzy_folders(self, base_path, target_name):
-        if not os.path.exists(base_path): return []
-        existing_folders = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d))]
-        return difflib.get_close_matches(target_name, existing_folders, n=3, cutoff=0.7)
+        self.create_styled_button(manager, "DELETE SELECTED", delete, self.colors["error"], "white").pack(fill="x", padx=20, pady=20)
 
     def run_phase_1(self):
         src = self.source_dir.get()
         if not src or not os.path.exists(src): return
         files = [f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f))]
-        self.progress['maximum'] = len(files); moved = 0
+        self.progress['maximum'] = len(files)
+        moved = 0
         for i, f in enumerate(files):
-            match = re.search(r'(\d{4})', f)
-            if match:
-                code = match.group(1); target = os.path.join(src, code)
-                if not os.path.exists(target): os.makedirs(target)
-                shutil.move(os.path.join(src, f), os.path.join(target, f)); moved += 1
+            m = re.search(r'(\d{4})', f)
+            if m:
+                c = m.group(1); t = os.path.join(src, c)
+                if not os.path.exists(t): os.makedirs(t)
+                shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log(f"Phase 1 Complete: Grouped {moved} files.", "success")
-        messagebox.showinfo("Done", "Files grouped.")
+        self.log(f"Phase 1 Complete: Grouped {moved} files.", "success"); messagebox.showinfo("Done", "Grouped.")
 
     def run_phase_rename(self):
         src = self.source_dir.get()
@@ -230,16 +247,14 @@ class JewelryManagerApp:
             files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
             if not files: continue
             
-            # Improvement 3: UI Selection for Main File
-            main_file = self.choose_main_file(path, files, folder_name)
+            # --- IMPROVEMENT: VISUAL PHOTO SELECTION ---
+            main_file = self.choose_main_file_visual(path, files, folder_name)
             if not main_file: continue
 
-            # Rename to temp
             temp_files = []
             for f in files:
                 temp = f"temp_{f}"; os.rename(os.path.join(path, f), os.path.join(path, temp)); temp_files.append(temp)
             
-            # Rename to final
             counter = 2
             for temp in temp_files:
                 ext = os.path.splitext(temp)[1]
@@ -250,26 +265,70 @@ class JewelryManagerApp:
             self.progress['value'] = i + 1; self.root.update_idletasks()
         self.log("Phase 2 Complete: Files renamed.", "success")
 
-    def choose_main_file(self, folder_path, files, folder_name):
-        # Auto-detect max index first
+    def choose_main_file_visual(self, folder_path, files, folder_name):
+        if len(files) <= 1: return files[0]
+        
+        # Suggestion Logic
         max_idx = -1; suggested = files[-1]
         for f in files:
             m = re.search(r'_(\d+)\.', f)
             if m and int(m.group(1)) > max_idx: max_idx = int(m.group(1)); suggested = f
         
-        # Simple selection dialog if more than 1 file
-        if len(files) <= 1: return files[0]
+        # Visual Gallery Dialog
+        win = tk.Toplevel(self.root); win.title(f"Select Primary Photo: {folder_name}"); win.geometry("900x700"); win.configure(bg="#121212"); win.grab_set()
+        result = tk.StringVar(value="")
+
+        tk.Label(win, text=f"SELECT PRIMARY PHOTO FOR: {folder_name}", fg=self.colors["accent"], bg="#121212", font=("Segoe UI", 12, "bold")).pack(pady=20)
         
-        win = tk.Toplevel(self.root); win.title(f"Select Main File for {folder_name}"); win.geometry("600x400"); win.grab_set()
-        choice = tk.StringVar(value=suggested)
-        tk.Label(win, text=f"Choose primary photo for {folder_name}:", bg="#1f1f1f", fg="white", pady=10).pack()
-        lb = tk.Listbox(win, font=("Consolas", 10), bg="#000000", fg="#ffffff", selectbackground="#00d1b2")
-        lb.pack(expand=True, fill="both", padx=20, pady=10)
-        for f in files: lb.insert(tk.END, f)
-        lb.select_set(files.index(suggested))
-        def ok(): choice.set(lb.get(lb.curselection())); win.destroy()
-        tk.Button(win, text="CONFIRM SELECTION", command=ok, bg="#00d1b2", relief="flat", height=2).pack(fill="x", padx=20, pady=10)
-        self.root.wait_window(win); return choice.get()
+        scroll_frame = tk.Frame(win, bg="#121212")
+        scroll_frame.pack(fill="both", expand=True)
+        canvas = tk.Canvas(scroll_frame, bg="#121212", highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(scroll_frame, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        gallery = tk.Frame(canvas, bg="#121212")
+        canvas.create_window((0, 0), window=gallery, anchor="nw")
+        
+        def on_click(f): result.set(f); win.destroy()
+
+        cols = 3; r, c = 0, 0
+        photo_refs = [] # To prevent GC
+        
+        for f in files:
+            try:
+                img = Image.open(os.path.join(folder_path, f)); img.thumbnail((250, 250))
+                ph = ImageTk.PhotoImage(img)
+                photo_refs.append(ph)
+                
+                f_frame = tk.Frame(gallery, bg="#1e1e1e", padx=10, pady=10, highlightthickness=2, highlightbackground="#333333")
+                f_frame.grid(row=r, column=c, padx=15, pady=15)
+                
+                lbl = tk.Label(f_frame, image=ph, bg="#1e1e1e", cursor="hand2")
+                lbl.pack()
+                lbl.bind("<Button-1>", lambda e, f=f: on_click(f))
+                
+                name_lbl = tk.Label(f_frame, text=f, fg="white", bg="#1e1e1e", font=("Arial", 8), width=25)
+                name_lbl.pack(pady=(5, 0))
+                
+                if f == suggested:
+                    f_frame.config(highlightbackground=self.colors["accent"])
+                    tk.Label(f_frame, text="SUGGESTED", fg=self.colors["accent"], bg="#1e1e1e", font=("Arial", 7, "bold")).pack()
+
+                # Hover Effects for gallery frames
+                def on_gal_enter(e, fr=f_frame): fr.config(highlightbackground="#555555")
+                def on_gal_leave(e, fr=f_frame, is_sug=(f==suggested)): 
+                    fr.config(highlightbackground=self.colors["accent"] if is_sug else "#333333")
+                f_frame.bind("<Enter>", on_gal_enter); f_frame.bind("<Leave>", on_gal_leave)
+                lbl.bind("<Enter>", on_gal_enter); lbl.bind("<Leave>", on_gal_leave)
+
+                c += 1
+                if c >= cols: c = 0; r += 1
+            except: pass
+
+        gallery.update_idletasks()
+        canvas.config(scrollregion=canvas.bbox("all"))
+        self.root.wait_window(win)
+        return result.get() if result.get() else suggested
 
     def get_range(self, num):
         start = ((num - 1) // 200) * 200 + 1
@@ -298,82 +357,72 @@ class JewelryManagerApp:
                 
                 t1_dir = os.path.join(p1, target_rel_dir); t2_dir = os.path.join(p2, target_rel_dir)
                 
-                # Fuzzy Match Improvement
                 if not os.path.exists(t1_dir):
-                    matches = self.find_fuzzy_folders(os.path.dirname(t1_dir), os.path.basename(t1_dir))
+                    matches = difflib.get_close_matches(os.path.basename(t1_dir), os.listdir(os.path.dirname(t1_dir)) if os.path.exists(os.path.dirname(t1_dir)) else [], n=3, cutoff=0.7)
                     if matches:
-                        match_win = tk.Toplevel(self.root); match_win.title("Fuzzy Match Selection"); match_win.geometry("400x300"); match_win.grab_set()
-                        selected_match = tk.StringVar(value=matches[0])
-                        tk.Label(match_win, text=f"Folder not found: {os.path.basename(t1_dir)}\nChoose best match:").pack(pady=10)
-                        for m in matches: tk.Radiobutton(match_win, text=m, variable=selected_match, value=m).pack(anchor="w", padx=50)
-                        def confirm_match(): match_win.destroy()
-                        tk.Button(match_win, text="USE SELECTED", command=confirm_match).pack(pady=10)
-                        self.root.wait_window(match_win)
-                        t1_dir = os.path.join(os.path.dirname(t1_dir), selected_match.get())
-                        t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(t1_dir), selected_match.get()))
-                
+                        match_win = tk.Toplevel(self.root); match_win.title("Match Selection"); match_win.geometry("400x300"); match_win.grab_set()
+                        sel = tk.StringVar(value=matches[0])
+                        tk.Label(match_win, text=f"Folder not found. Choose best match:").pack(pady=10)
+                        for m in matches: tk.Radiobutton(match_win, text=m, variable=sel, value=m).pack(anchor="w", padx=50)
+                        tk.Button(match_win, text="USE SELECTED", command=match_win.destroy).pack(pady=10); self.root.wait_window(match_win)
+                        t1_dir = os.path.join(os.path.dirname(t1_dir), sel.get())
+                        t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(t1_dir), sel.get()))
+
                 if not os.path.exists(t1_dir):
-                    msg = f"{folder_name}: [Photo 1 Folder Missing]"; self.log(msg, "error"); errors.append(msg); skipped_count += 1; continue
+                    msg = f"{folder_name}: [Photo 1 Missing]"; self.log(msg, "error"); errors.append(msg); skipped_count += 1; continue
 
-                # Clean-up All Suffixes Logic
                 base_code = folder_name.upper()
-                alt_suffix = "-SC0" if "-S00" in base_code else "-S00" if "-SC0" in base_code else None
                 alt_code = base_code.replace("-S00", "-SC0") if "-S00" in base_code else base_code.replace("-SC0", "-S00") if "-SC0" in base_code else None
+                old_p1_files = [os.path.join(t1_dir, f) for f in os.listdir(t1_dir) if os.path.splitext(f)[0].upper() in [base_code, alt_code]]
+                old_p2_files = [os.path.join(t2_dir, f) for f in os.listdir(t2_dir) if os.path.exists(t2_dir) and os.path.splitext(f)[0].upper() in [base_code, alt_code]]
 
-                old_files_p1 = [os.path.join(t1_dir, f) for f in os.listdir(t1_dir) if os.path.splitext(f)[0].upper() in [base_code, alt_code]]
-                old_files_p2 = [os.path.join(t2_dir, f) for f in os.listdir(t2_dir) if os.path.exists(t2_dir) and os.path.splitext(f)[0].upper() in [base_code, alt_code]]
-
-                if self.show_preview(old_files_p1[0] if old_files_p1 else None, old_files_p2[0] if old_files_p2 else None, os.path.join(folder_path, main_file), target_rel_dir):
+                if self.show_preview(old_p1_files[0] if old_p1_files else None, old_p2_files[0] if old_p2_files else None, os.path.join(folder_path, main_file), target_rel_dir):
                     try:
-                        for f in old_files_p1: os.remove(f)
+                        for f in old_p1_files: os.remove(f)
                         shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t1_dir, main_file))
                         if os.path.exists(t2_dir):
-                            for f in old_files_p2: os.remove(f)
+                            for f in old_p2_files: os.remove(f)
                             shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t2_dir, main_file))
                         success_count += 1; self.log(f"Success: {folder_name}", "success")
-                    except Exception as e:
-                        self.log(f"Error {folder_name}: {str(e)}", "error"); errors.append(f"{folder_name}: {str(e)}")
+                    except Exception as e: self.log(f"Error {folder_name}: {e}", "error"); errors.append(f"{folder_name}: {e}")
                 else: skipped_count += 1
             self.progress['value'] = i + 1; self.root.update_idletasks()
         
-        summary = f"Results:\n- Success: {success_count}\n- Skipped/Error: {skipped_count}"
-        if errors: messagebox.showwarning("Summary", summary + "\n\nErrors:\n" + "\n".join(errors))
-        else: messagebox.showinfo("Summary", summary)
+        summary = f"Done!\n- Success: {success_count}\n- Skipped: {skipped_count}"
+        messagebox.showwarning("Summary", summary + "\n\nErrors:\n" + "\n".join(errors)) if errors else messagebox.showinfo("Summary", summary)
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
         if not all([src, arc]): return
-        self.log("--- Starting Phase 4: Archive ---", "info")
-        now = datetime.now()
-        archive_path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
-        if not os.path.exists(archive_path): os.makedirs(archive_path)
+        now = datetime.now(); path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
+        if not os.path.exists(path): os.makedirs(path)
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
         self.progress['maximum'] = len(folders)
-        for i, folder_name in enumerate(folders):
-            src_p = os.path.join(src, folder_name); dst_p = os.path.join(archive_path, folder_name)
+        for i, f_name in enumerate(folders):
+            src_p = os.path.join(src, f_name); dst_p = os.path.join(path, f_name)
             if os.path.exists(dst_p): dst_p = f"{dst_p}_{datetime.now().strftime('%H%M%S')}"
-            try: shutil.move(src_p, dst_p); self.log(f"Archived: {folder_name}")
-            except Exception as e: self.log(f"Error: {str(e)}", "error")
+            try: shutil.move(src_p, dst_p); self.log(f"Archived: {f_name}")
+            except Exception as e: self.log(f"Error: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("Archive Complete.", "success"); messagebox.showinfo("Done", "Archived.")
+        messagebox.showinfo("Done", "Archived.")
 
     def show_preview(self, p1, p2, new, dest):
-        dialog = tk.Toplevel(self.root); dialog.title("Preview"); dialog.geometry("1000x700"); dialog.configure(bg="#121212"); dialog.grab_set()
+        dialog = tk.Toplevel(self.root); dialog.title("Preview Comparison"); dialog.geometry("1000x750"); dialog.configure(bg="#121212"); dialog.grab_set()
         res = tk.BooleanVar(value=False)
-        tk.Label(dialog, text=f"DESTINATION: {dest}", fg="#00ffcc", bg="#1e1e1e", pady=10, font=("Consolas", 10)).pack(fill="x")
+        tk.Label(dialog, text=f"DESTINATION: {dest}", fg=self.colors["accent"], bg="#1e1e1e", pady=12, font=("Consolas", 10, "bold")).pack(fill="x")
         grid = tk.Frame(dialog, bg="#121212", padx=20, pady=20); grid.pack(expand=True, fill="both")
         def add_box(parent, p, title):
             box = tk.Frame(parent, bg="#121212"); box.pack(side="left", expand=True, fill="both")
-            tk.Label(box, text=title, fg="#888888", bg="#121212", font=("Segoe UI", 10, "bold")).pack(pady=5)
+            tk.Label(box, text=title, fg=self.colors["text_dim"], bg="#121212", font=("Segoe UI", 10, "bold")).pack(pady=5)
             if p and os.path.exists(p):
                 img = Image.open(p); img.thumbnail((300, 300)); ph = ImageTk.PhotoImage(img)
-                l = tk.Label(box, image=ph, bg="#1e1e1e"); l.image = ph; l.pack()
-                tk.Label(box, text=os.path.basename(p), fg="#444444", bg="#121212", font=("Arial", 8)).pack()
-            else: tk.Label(box, text="[ NOT FOUND ]", fg="#333333", bg="#121212", font=("Segoe UI", 12, "bold")).pack(pady=120)
-        add_box(grid, p1, "PHOTO 1"); add_box(grid, p2, "PHOTO 2"); add_box(grid, new, "NEW FILE")
-        btn_f = tk.Frame(dialog, bg="#1e1e1e", pady=20); btn_f.pack(side="bottom", fill="x")
-        tk.Button(btn_f, text="REPLACE PHOTOS", bg="#00d1b2", fg="#121212", font=("Segoe UI", 12, "bold"), width=25, height=2, command=lambda: [res.set(True), dialog.destroy()]).pack(side="left", padx=50)
-        tk.Button(btn_f, text="SKIP", bg="#333333", fg="white", width=20, height=2, command=dialog.destroy).pack(side="right", padx=50)
+                l = tk.Label(box, image=ph, bg="#1e1e1e", highlightthickness=1, highlightbackground="#333333"); l.image = ph; l.pack()
+                tk.Label(box, text=os.path.basename(p), fg="#555555", bg="#121212", font=("Arial", 8)).pack(pady=5)
+            else: tk.Label(box, text="[ NOT FOUND ]", fg="#333333", bg="#121212", font=("Segoe UI", 12, "bold")).pack(pady=130)
+        add_box(grid, p1, "PHOTO 1 (CURRENT)"); add_box(grid, p2, "PHOTO 2 (CURRENT)"); add_box(grid, new, "NEW PHOTO")
+        btn_f = tk.Frame(dialog, bg="#1e1e1e", pady=30); btn_f.pack(side="bottom", fill="x")
+        self.create_styled_button(btn_f, "REPLACE PHOTOS", lambda: [res.set(True), dialog.destroy()], self.colors["accent"], "#121212").pack(side="left", padx=100, expand=True, fill="x")
+        self.create_styled_button(btn_f, "SKIP ITEM", dialog.destroy, "#333333", "white").pack(side="right", padx=100, expand=True, fill="x")
         self.root.wait_window(dialog); return res.get()
 
 if __name__ == "__main__":
