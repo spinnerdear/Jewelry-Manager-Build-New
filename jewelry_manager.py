@@ -5,8 +5,19 @@ import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageEnhance
 import difflib
+import threading
+import io
+
+# AI and Image Processing support
+try:
+    from rembg import remove
+    import cv2
+    import numpy as np
+    HAS_AI_LIBS = True
+except ImportError:
+    HAS_AI_LIBS = False
 
 # Drag and Drop support
 try:
@@ -18,7 +29,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "1.9"
+        self.version = "2.0 Beta 1"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
@@ -157,6 +168,11 @@ class JewelryManagerApp:
         tk.Label(right_side, text="WORKFLOW PROGRESS", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 10))
         
         self.create_styled_button(right_side, "1. GROUP BY CODE (4 DIGITS)", self.run_phase_1, "#2d2d2d", "white").pack(fill="x", pady=4)
+        
+        # New AI Retouch Button
+        self.ai_btn = self.create_styled_button(right_side, "1.5 🤖 AI RETOUCH IMAGES", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
+        self.ai_btn.pack(fill="x", pady=4)
+
         self.create_styled_button(right_side, "2. RENAME FILES", self.run_phase_rename, "#2d2d2d", "white").pack(fill="x", pady=4)
         self.create_styled_button(right_side, "3. COLLECT PHOTOS", self.run_phase_backup, "#2d2d2d", "white").pack(fill="x", pady=4)
         self.create_styled_button(right_side, "4. MOVE TO ARCHIVE", self.run_phase_archive, "#2d2d2d", "white").pack(fill="x", pady=4)
@@ -236,6 +252,63 @@ class JewelryManagerApp:
                 shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
             self.progress['value'] = i + 1; self.root.update_idletasks()
         self.log(f"Phase 1 Complete: Grouped {moved} files.", "success"); messagebox.showinfo("Done", "Grouped.")
+
+    def run_phase_ai_retouch(self):
+        if not HAS_AI_LIBS:
+            messagebox.showerror("Error", "AI Libraries not found.\nPlease install: pip install rembg opencv-python numpy pillow onnxruntime")
+            return
+        src = self.source_dir.get()
+        if not src or not os.path.exists(src): return
+        
+        all_images = []
+        for root, dirs, files in os.walk(src):
+            if "ai_retouched" in root: continue
+            for f in files:
+                if f.lower().endswith(('.png', '.jpg', '.jpeg')): all_images.append(os.path.join(root, f))
+        
+        if not all_images: messagebox.showinfo("Info", "No images to retouch."); return
+        if not messagebox.askyesno("Confirm", f"Process {len(all_images)} images with AI?\nThis may take some time."): return
+
+        self.ai_btn.config(state="disabled")
+        threading.Thread(target=self.ai_retouch_process, args=(all_images,), daemon=True).start()
+
+    def ai_retouch_process(self, image_paths):
+        self.progress['maximum'] = len(image_paths)
+        success_count = 0
+        self.log("🚀 Starting AI Retouching...", "highlight")
+        
+        for i, path in enumerate(image_paths):
+            try:
+                folder = os.path.dirname(path); filename = os.path.basename(path)
+                out_dir = os.path.join(folder, "ai_retouched")
+                if not os.path.exists(out_dir): os.makedirs(out_dir)
+                out_path = os.path.join(out_dir, filename)
+
+                # 1. Background Removal
+                self.log(f"Processing: {filename}...", "info")
+                with open(path, 'rb') as f: input_data = f.read()
+                output_data = remove(input_data)
+                
+                # 2. Enhancement
+                img = Image.open(io.BytesIO(output_data)).convert("RGBA")
+                white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+                img = Image.alpha_composite(white_bg, img).convert("RGB")
+
+                # Sharpness & Contrast (Turbo Enhancement)
+                img = ImageEnhance.Sharpness(img).enhance(2.5) 
+                img = ImageEnhance.Contrast(img).enhance(1.3)
+                
+                # Shank Reconstruction (Simulated via localized sharpening)
+                # In Beta 1, we boost overall clarity; specialized Inpainting will come in Beta 2
+                
+                img.save(out_path, "JPEG", quality=95)
+                success_count += 1; self.log(f"Success: {filename}", "success")
+            except Exception as e: self.log(f"Error {filename}: {e}", "error")
+            self.progress['value'] = i + 1; self.root.update_idletasks()
+
+        self.log(f"AI Complete: {success_count} images processed.", "highlight")
+        self.ai_btn.config(state="normal")
+        self.root.after(0, lambda: messagebox.showinfo("Done", f"AI Retouching Finished!\nProcessed {success_count} images."))
 
     def run_phase_rename(self):
         src = self.source_dir.get()
