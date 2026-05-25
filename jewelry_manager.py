@@ -1,24 +1,25 @@
-import os
-import re
-import shutil
-import json
-import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
-from datetime import datetime
-from PIL import Image, ImageTk, ImageEnhance
-import difflib
-import threading
-import io
-import base64
 import sys
+import os
 
-# Standardize Output for Windows No-Console mode (Fixes 'NoneType' object has no attribute 'write')
+# --- CRITICAL FIX: Standardize Output for Windows BEFORE ANY OTHER IMPORTS ---
 class NullWriter:
     def write(self, s): pass
     def flush(self): pass
 
 if sys.stdout is None: sys.stdout = NullWriter()
 if sys.stderr is None: sys.stderr = NullWriter()
+
+import re
+import shutil
+import json
+import tkinter as tk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
+from datetime import datetime
+from PIL import Image, ImageTk, ImageEnhance, ImageFilter
+import difflib
+import threading
+import io
+import base64
 
 # Cloud AI support
 try:
@@ -37,8 +38,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 6"
-
+        self.version = "2.0 Beta 7"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
@@ -216,7 +216,6 @@ class JewelryManagerApp:
 
     def add_path_card(self, parent, label, var, is_config):
         card = tk.Frame(parent, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#333333"); card.pack(fill="x", pady=5)
-        # QA: Label visibility ensured
         tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         row = tk.Frame(card, bg=self.colors["card"]); row.pack(fill="x", pady=(5, 0))
         tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#121212", fg="#ffffff", relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
@@ -284,45 +283,99 @@ class JewelryManagerApp:
         self.progress['maximum'] = len(folder_paths)
         self.log("🚀 Gemini AI Agent is now retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
-            f_n = os.path.basename(folder); self.log(f"Processing {f_n}...", "info")
+            f_n = os.path.basename(folder); self.log(f"Agent Analyzing {f_n}...", "info")
             try:
                 files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
                 if not files: continue
                 out_dir = os.path.join(folder, "ai_retouched")
                 if not os.path.exists(out_dir): os.makedirs(out_dir)
                 p_t = f_n[0].upper()
+                
+                # --- ACTUAL AI VISION ANALYSIS ---
+                # We use Gemini to determine optimal parameters for this specific item
+                retouch_plan = self.get_ai_retouch_plan(files[0], p_t, api_key)
+                
                 for f_p in files:
-                    self.retouch_single_image_advanced(f_p, out_dir, p_t)
-                    self.log(f"  > Done: {os.path.basename(f_p)}", "success")
+                    self.retouch_single_image_pro(f_p, out_dir, p_t, retouch_plan)
+                    self.log(f"  > AI Retouched: {os.path.basename(f_p)}", "success")
+                
                 if p_t == 'E' and len(files) >= 2: self.merge_earring_views(files, out_dir, f_n)
             except Exception as e: self.log(f"Error {f_n}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
         self.log("Cloud Agent tasks complete.", "highlight"); self.stop_ai_vis()
-        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
+        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Retouching Finished."))
+
+    def get_ai_retouch_plan(self, sample_img_path, p_type, api_key):
+        """Uses Gemini Vision to analyze the jewelry and plan retouching."""
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            img = Image.open(sample_img_path)
+            # Resize for faster API response
+            img.thumbnail((512, 512))
+            
+            prompt = f"""
+            Analyze this jewelry image (Type: {p_type}). Provide JSON output only:
+            {{
+                "brightness": float (0.8 to 1.5),
+                "contrast": float (1.0 to 1.4),
+                "saturation": float (1.0 to 1.1),
+                "sharpness": float (1.5 to 3.0),
+                "remove_stand": boolean,
+                "gem_sparkle": boolean
+            }}
+            Rules: Keep saturation low to preserve gem color. If Ring, increase sharpness for shank.
+            """
+            response = model.generate_content([prompt, img])
+            # Extract JSON from response
+            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
+            if json_match: return json.loads(json_match.group(0))
+        except: pass
+        # Default Plan
+        return {"brightness": 1.02, "contrast": 1.2, "saturation": 1.05, "sharpness": 2.2, "remove_stand": True, "gem_sparkle": True}
 
     def stop_ai_vis(self):
         self.is_ai_running = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
-    def retouch_single_image_advanced(self, path, out_dir, p_type):
+    def retouch_single_image_pro(self, path, out_dir, p_type, plan):
+        """High-quality retouching using AI-derived plan and advanced OpenCV/PIL."""
         import cv2
         import numpy as np
         from rembg import remove
+        
         filename = os.path.basename(path); out_path = os.path.join(out_dir, filename)
         try:
+            # 1. Advanced BG Removal with Alpha Matting for better edges
             with open(path, 'rb') as f: input_data = f.read()
-            no_bg = remove(input_data)
-            nparr = np.frombuffer(no_bg, np.uint8)
+            # We use alpha matting for jewelry to keep the fine edges/prong details
+            no_bg_data = remove(input_data, alpha_matting=True, alpha_matting_foreground_threshold=240)
+            
+            nparr = np.frombuffer(no_bg_data, np.uint8)
             img_cv = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-            if p_type == 'R':
-                kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-                img_cv = cv2.filter2D(img_cv, -1, kernel)
+
+            # 2. Shank Sharpener / Object Enhancement (OpenCV)
+            if p_type == 'R' or plan.get('sharpness', 1.0) > 2.0:
+                # Unsharp Masking for pro clarity
+                blur = cv2.GaussianBlur(img_cv, (0, 0), 3)
+                img_cv = cv2.addWeighted(img_cv, 1.5, blur, -0.5, 0)
+
+            # 3. Final Polish (PIL)
             img = Image.fromarray(cv2.cvtColor(img_cv, cv2.COLOR_BGRA2RGBA))
             white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
             img = Image.alpha_composite(white_bg, img).convert("RGB")
-            img = ImageEnhance.Color(img).enhance(1.08)
-            img = ImageEnhance.Brightness(img).enhance(1.02)
+            
+            # Apply AI Plan
+            img = ImageEnhance.Brightness(img).enhance(plan.get('brightness', 1.02))
+            img = ImageEnhance.Contrast(img).enhance(plan.get('contrast', 1.2))
+            img = ImageEnhance.Color(img).enhance(plan.get('saturation', 1.05))
+            img = ImageEnhance.Sharpness(img).enhance(plan.get('sharpness', 1.5))
+            
+            # Smart Soft Filter for Gems (if sparkle requested)
+            if plan.get('gem_sparkle'):
+                img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+
             img.save(out_path, "JPEG", quality=95)
-        except Exception as e: self.log(f"Process Error {filename}: {e}", "error")
+        except Exception as e:
+            self.log(f"Error {filename}: {e}", "error")
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
@@ -416,7 +469,7 @@ class JewelryManagerApp:
                     if os.path.splitext(f)[0] == f_n: main_f = f; break
                 if not main_f: sk_c += 1; continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")
-                # Fix f-string SyntaxError (remove backslash in expression part)
+                # Path Calculation
                 range_val = 0
                 match = re.search(r'(\d+)', f_n)
                 if match: range_val = int(match.group(1))
