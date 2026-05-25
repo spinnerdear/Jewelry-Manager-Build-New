@@ -422,60 +422,142 @@ class JewelryManagerApp:
 
     def run_phase_backup(self):
         src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
-        if not all([src, p1, p2]): return
-        self.log("--- Starting Phase 3: Collect Photos ---", "info")
-        folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
-        self.progress['maximum'] = len(folders); errors = []; success_count = 0; skipped_count = 0
-        
-        for i, folder_name in enumerate(folders):
-            folder_path = os.path.join(src, folder_name)
-            main_file = None
-            for f in os.listdir(folder_path):
-                if os.path.splitext(f)[0] == folder_name: main_file = f; break
+        if not all([src, p1, p2]):
+            messagebox.showwarning("Warning", "Please configure all paths first.")
+            return
+
+        def backup_task():
+            self.log("--- Starting Phase 3: Collect Photos ---", "highlight")
+            folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
+            self.progress['maximum'] = len(folders)
+            self.progress['value'] = 0
             
-            if main_file:
+            errors = []; success_count = 0; skipped_count = 0
+
+            for i, folder_name in enumerate(folders):
+                self.log(f"Processing: {folder_name}...", "info")
+                folder_path = os.path.join(src, folder_name)
+                
+                # Find main file (the one renamed to the code itself)
+                main_file = None
+                try:
+                    for f in os.listdir(folder_path):
+                        if os.path.splitext(f)[0] == folder_name:
+                            main_file = f; break
+                except: pass
+
+                if not main_file:
+                    self.log(f"Skipped: {folder_name} (Main photo not found/renamed yet)", "warning")
+                    skipped_count += 1
+                    continue
+
+                # Path Logic
                 p_type = self.type_mapping.get(folder_name[0].upper(), "Other")
-                if "-VN-" in folder_name.upper(): target_rel_dir = os.path.join("Vincentio", p_type)
+                if "-VN-" in folder_name.upper(): 
+                    target_rel_dir = os.path.join("Vincentio", p_type)
                 else:
                     num_match = re.search(r'(\d+)', folder_name)
                     range_str = self.get_range(int(num_match.group(1))) if num_match else "Unknown"
                     target_rel_dir = os.path.join(p_type, f"{p_type} {range_str}")
                 
-                t1_dir = os.path.join(p1, target_rel_dir); t2_dir = os.path.join(p2, target_rel_dir)
+                t1_dir = os.path.join(p1, target_rel_dir)
+                t2_dir = os.path.join(p2, target_rel_dir)
+                
+                # Check for t1_dir existence with fuzzy matching
+                if not os.path.exists(t1_dir):
+                    self.log(f"Target folder not found: {target_rel_dir}. Looking for matches...", "warning")
+                    parent_dir = os.path.dirname(t1_dir)
+                    if os.path.exists(parent_dir):
+                        candidates = os.listdir(parent_dir)
+                        matches = difflib.get_close_matches(os.path.basename(t1_dir), candidates, n=3, cutoff=0.6)
+                        
+                        if matches:
+                            # Show selection dialog with context
+                            selected_folder = self.ask_folder_match_visual(folder_name, target_rel_dir, parent_dir, matches)
+                            if selected_folder:
+                                t1_dir = os.path.join(parent_dir, selected_folder)
+                                # Update t2_dir to match the selected t1 name
+                                t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(target_rel_dir), selected_folder))
+                                self.log(f"Using matched folder: {selected_folder}", "info")
                 
                 if not os.path.exists(t1_dir):
-                    matches = difflib.get_close_matches(os.path.basename(t1_dir), os.listdir(os.path.dirname(t1_dir)) if os.path.exists(os.path.dirname(t1_dir)) else [], n=3, cutoff=0.7)
-                    if matches:
-                        match_win = tk.Toplevel(self.root); match_win.title("Match Selection"); match_win.geometry("400x300"); match_win.grab_set()
-                        sel = tk.StringVar(value=matches[0])
-                        tk.Label(match_win, text=f"Folder not found. Choose best match:").pack(pady=10)
-                        for m in matches: tk.Radiobutton(match_win, text=m, variable=sel, value=m).pack(anchor="w", padx=50)
-                        tk.Button(match_win, text="USE SELECTED", command=match_win.destroy).pack(pady=10); self.root.wait_window(match_win)
-                        t1_dir = os.path.join(os.path.dirname(t1_dir), sel.get())
-                        t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(t1_dir), sel.get()))
+                    msg = f"Error: Destination for {folder_name} missing ({target_rel_dir})"
+                    self.log(msg, "error"); errors.append(msg); skipped_count += 1
+                    continue
 
-                if not os.path.exists(t1_dir):
-                    msg = f"{folder_name}: [Photo 1 Missing]"; self.log(msg, "error"); errors.append(msg); skipped_count += 1; continue
+                # Final Copy Logic
+                try:
+                    base_code = folder_name.upper()
+                    alt_code = base_code.replace("-S00", "-SC0") if "-S00" in base_code else base_code.replace("-SC0", "-S00") if "-SC0" in base_code else None
+                    
+                    old_p1_files = [os.path.join(t1_dir, f) for f in os.listdir(t1_dir) if os.path.splitext(f)[0].upper() in [base_code, alt_code]]
+                    old_p2_files = [os.path.join(t2_dir, f) for f in os.listdir(t2_dir) if os.path.exists(t2_dir) and os.path.splitext(f)[0].upper() in [base_code, alt_code]]
 
-                base_code = folder_name.upper()
-                alt_code = base_code.replace("-S00", "-SC0") if "-S00" in base_code else base_code.replace("-SC0", "-S00") if "-SC0" in base_code else None
-                old_p1_files = [os.path.join(t1_dir, f) for f in os.listdir(t1_dir) if os.path.splitext(f)[0].upper() in [base_code, alt_code]]
-                old_p2_files = [os.path.join(t2_dir, f) for f in os.listdir(t2_dir) if os.path.exists(t2_dir) and os.path.splitext(f)[0].upper() in [base_code, alt_code]]
-
-                if self.show_preview(old_p1_files[0] if old_p1_files else None, old_p2_files[0] if old_p2_files else None, os.path.join(folder_path, main_file), target_rel_dir):
-                    try:
+                    if self.show_preview(old_p1_files[0] if old_p1_files else None, old_p2_files[0] if old_p2_files else None, os.path.join(folder_path, main_file), t1_dir):
+                        # Delete old if replace approved
                         for f in old_p1_files: os.remove(f)
                         shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t1_dir, main_file))
-                        if os.path.exists(t2_dir):
+                        
+                        if os.path.exists(os.path.dirname(t2_dir)): # Ensure backup parent exists
+                            if not os.path.exists(t2_dir): os.makedirs(t2_dir)
                             for f in old_p2_files: os.remove(f)
                             shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t2_dir, main_file))
-                        success_count += 1; self.log(f"Success: {folder_name}", "success")
-                    except Exception as e: self.log(f"Error {folder_name}: {e}", "error"); errors.append(f"{folder_name}: {e}")
-                else: skipped_count += 1
-            self.progress['value'] = i + 1; self.root.update_idletasks()
+                        
+                        success_count += 1
+                        self.log(f"Successfully collected: {folder_name}", "success")
+                    else:
+                        self.log(f"Skipped by user: {folder_name}", "info")
+                        skipped_count += 1
+                except Exception as e:
+                    self.log(f"Failed to copy {folder_name}: {e}", "error")
+                    errors.append(f"{folder_name}: {e}")
+                
+                self.progress['value'] = i + 1
+                self.root.update_idletasks()
+
+            self.log(f"--- Phase 3 Done! Success: {success_count}, Skipped: {skipped_count} ---", "highlight")
+            self.root.after(0, lambda: self.finish_phase_3(success_count, skipped_count, errors))
+
+        self.phase_3_btn = self.root.focus_get() # Identify which button was clicked
+        if hasattr(self, 'ai_btn'): self.ai_btn.config(state="disabled") # Simple way to block other actions
+        threading.Thread(target=backup_task, daemon=True).start()
+
+    def ask_folder_match_visual(self, product_code, original_target, parent_path, matches):
+        """Helper to show folder suggestion dialog with context."""
+        win = tk.Toplevel(self.root); win.title("Select Destination Folder"); win.geometry("550x450"); win.grab_set()
+        res = tk.StringVar(value="")
+
+        tk.Label(win, text=f"DESTINATION NOT FOUND FOR:", fg=self.colors["text_dim"], bg=win.cget("bg"), font=("Segoe UI", 9)).pack(pady=(20, 0))
+        tk.Label(win, text=product_code, fg=self.colors["accent"], font=("Segoe UI", 16, "bold")).pack()
+        tk.Label(win, text=f"Expected: {original_target}", fg="#ff5555", font=("Consolas", 8)).pack(pady=5)
+
+        tk.Label(win, text="Please select the correct folder from below:", pady=10).pack()
         
-        summary = f"Done!\n- Success: {success_count}\n- Skipped: {skipped_count}"
-        messagebox.showwarning("Summary", summary + "\n\nErrors:\n" + "\n".join(errors)) if errors else messagebox.showinfo("Summary", summary)
+        lb = tk.Listbox(win, font=("Segoe UI", 10), bg="#1e1e1e", fg="white", selectbackground=self.colors["accent"])
+        lb.pack(fill="both", expand=True, padx=40)
+        for m in matches: lb.insert(tk.END, f"📁 {m}")
+
+        tk.Label(win, text=f"Location: {parent_path}", fg="#666666", font=("Arial", 7)).pack(pady=5)
+
+        def on_select():
+            if lb.curselection():
+                idx = lb.curselection()[0]
+                res.set(matches[idx])
+                win.destroy()
+
+        tk.Button(win, text="USE SELECTED FOLDER", command=on_select, bg=self.colors["accent"], fg="#121212", font=("Segoe UI", 10, "bold"), height=2).pack(fill="x", padx=40, pady=20)
+        
+        self.root.wait_window(win)
+        return res.get()
+
+    def finish_phase_3(self, success, skipped, errors):
+        if hasattr(self, 'ai_btn'): self.ai_btn.config(state="normal")
+        summary = f"Phase 3 Completed!\n\nSuccess: {success}\nSkipped: {skipped}"
+        if errors:
+            summary += f"\n\nErrors encountered: {len(errors)}"
+            messagebox.showwarning("Process Summary", summary)
+        else:
+            messagebox.showinfo("Process Summary", summary)
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
