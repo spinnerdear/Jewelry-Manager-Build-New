@@ -34,6 +34,18 @@ class JewelryManagerApp:
         self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
 
+        # Centralized Error Codes (QA: Standardized Troubleshooting)
+        self.error_codes = {
+            "E001": "เส้นทางที่ระบุไม่ถูกต้องหรือหาไม่พบ (Path Not Found)",
+            "E002": "ไม่พบไฟล์รูปภาพในโฟลเดอร์ต้นทาง (File Not Found)",
+            "E003": "ไม่มีสิทธิ์เข้าถึงหรือแก้ไขไฟล์/โฟลเดอร์นี้ (Permission Denied)",
+            "E004": "มีไฟล์ชื่อนี้อยู่แล้วในปลายทาง (File Already Exists)",
+            "E005": "ไดรฟ์ปลายทางไม่ได้เชื่อมต่อหรือออฟไลน์อยู่ (Drive Offline/Disconnected)",
+            "E006": "ไม่พบไฟล์สมองกลของ AI (AI Model Missing)",
+            "E007": "เกิดปัญหาขณะก๊อปปี้ไฟล์ (Copy Operation Failed)",
+            "E999": "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ (Unknown Error)"
+        }
+
         # Config file path
         self.config_dir = os.path.join(os.path.expanduser("~"), ".jewelry_manager")
         if not os.path.exists(self.config_dir): os.makedirs(self.config_dir)
@@ -89,11 +101,17 @@ class JewelryManagerApp:
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
 
-    def log(self, message, category="info"):
+    def log(self, message, category="info", code=None):
         timestamp = datetime.now().strftime("%H:%M:%S")
         self.log_area.configure(state='normal')
         tag = "info"; prefix = "• "
-        if "สำเร็จ" in message or "Success" in message: tag = "success"; prefix = "✔ "
+        
+        # QA Fix: Standardized error logging with codes and Thai descriptions
+        if category == "error":
+            tag = "error"; prefix = "✖ "
+            if code and code in self.error_codes:
+                message = f"[{code}] {message} -> {self.error_codes[code]}"
+        elif "สำเร็จ" in message or "Success" in message: tag = "success"; prefix = "✔ "
         elif "ข้าม" in message or "Skipped" in message or "ไม่พบ" in message: tag = "warning"; prefix = "⚠ "
         elif "Error" in message or "ผิดพลาด" in message: tag = "error"; prefix = "✖ "
         elif "ตรวจพบ" in message or "Highlight" in message: tag = "highlight"; prefix = "✨ "
@@ -428,6 +446,15 @@ class JewelryManagerApp:
 
         def backup_task():
             self.log("--- Starting Phase 3: Collect Photos ---", "highlight")
+            
+            # PRE-CHECK: Master Drives Existence
+            for d_name, d_path in [("PHOTO 1", p1), ("PHOTO 2", p2)]:
+                drive_letter = os.path.splitdrive(d_path)[0]
+                if drive_letter and not os.path.exists(drive_letter):
+                    self.log(f"{d_name} Drive ({drive_letter}) is Offline", "error", "E005")
+                    self.root.after(0, lambda: messagebox.showerror("Drive Error", f"Cannot find drive {drive_letter}.\nPlease check connection."))
+                    return
+
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             self.progress['maximum'] = len(folders)
             self.progress['value'] = 0
@@ -438,20 +465,26 @@ class JewelryManagerApp:
                 self.log(f"Processing: {folder_name}...", "info")
                 folder_path = os.path.join(src, folder_name)
                 
-                # Find main file (the one renamed to the code itself)
+                # Check source folder
+                if not os.path.exists(folder_path):
+                    self.log(f"Local folder missing: {folder_name}", "error", "E001")
+                    skipped_count += 1; continue
+
+                # Find main file
                 main_file = None
                 try:
                     for f in os.listdir(folder_path):
                         if os.path.splitext(f)[0] == folder_name:
                             main_file = f; break
-                except: pass
+                except Exception as e:
+                    self.log(f"Access Denied: {folder_name} ({e})", "error", "E003")
+                    skipped_count += 1; continue
 
                 if not main_file:
-                    self.log(f"Skipped: {folder_name} (Main photo not found/renamed yet)", "warning")
-                    skipped_count += 1
-                    continue
+                    self.log(f"Skipped: {folder_name} (No renamed photo found)", "warning")
+                    skipped_count += 1; continue
 
-                # Path Logic
+                # Destination Logic
                 p_type = self.type_mapping.get(folder_name[0].upper(), "Other")
                 if "-VN-" in folder_name.upper(): 
                     target_rel_dir = os.path.join("Vincentio", p_type)
@@ -463,27 +496,24 @@ class JewelryManagerApp:
                 t1_dir = os.path.join(p1, target_rel_dir)
                 t2_dir = os.path.join(p2, target_rel_dir)
                 
-                # Check for t1_dir existence with fuzzy matching
+                # Check for destination existence with fuzzy matching
                 if not os.path.exists(t1_dir):
-                    self.log(f"Target folder not found: {target_rel_dir}. Looking for matches...", "warning")
+                    self.log(f"Destination missing: {target_rel_dir}", "warning")
                     parent_dir = os.path.dirname(t1_dir)
                     if os.path.exists(parent_dir):
                         candidates = os.listdir(parent_dir)
                         matches = difflib.get_close_matches(os.path.basename(t1_dir), candidates, n=3, cutoff=0.6)
-                        
                         if matches:
-                            # Show selection dialog with context
                             selected_folder = self.ask_folder_match_visual(folder_name, target_rel_dir, parent_dir, matches)
                             if selected_folder:
                                 t1_dir = os.path.join(parent_dir, selected_folder)
-                                # Update t2_dir to match the selected t1 name
                                 t2_dir = os.path.join(p2, target_rel_dir.replace(os.path.basename(target_rel_dir), selected_folder))
-                                self.log(f"Using matched folder: {selected_folder}", "info")
+                                self.log(f"Manual match selected: {selected_folder}", "info")
                 
                 if not os.path.exists(t1_dir):
-                    msg = f"Error: Destination for {folder_name} missing ({target_rel_dir})"
-                    self.log(msg, "error"); errors.append(msg); skipped_count += 1
-                    continue
+                    self.log(f"Path not found: {target_rel_dir}", "error", "E001")
+                    errors.append(f"{folder_name}: Path missing")
+                    skipped_count += 1; continue
 
                 # Final Copy Logic
                 try:
@@ -498,7 +528,7 @@ class JewelryManagerApp:
                         for f in old_p1_files: os.remove(f)
                         shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t1_dir, main_file))
                         
-                        if os.path.exists(os.path.dirname(t2_dir)): # Ensure backup parent exists
+                        if os.path.exists(os.path.dirname(t2_dir)):
                             if not os.path.exists(t2_dir): os.makedirs(t2_dir)
                             for f in old_p2_files: os.remove(f)
                             shutil.copy2(os.path.join(folder_path, main_file), os.path.join(t2_dir, main_file))
@@ -509,7 +539,7 @@ class JewelryManagerApp:
                         self.log(f"Skipped by user: {folder_name}", "info")
                         skipped_count += 1
                 except Exception as e:
-                    self.log(f"Failed to copy {folder_name}: {e}", "error")
+                    self.log(f"Failed to copy {folder_name}: {e}", "error", "E007")
                     errors.append(f"{folder_name}: {e}")
                 
                 self.progress['value'] = i + 1
@@ -518,8 +548,6 @@ class JewelryManagerApp:
             self.log(f"--- Phase 3 Done! Success: {success_count}, Skipped: {skipped_count} ---", "highlight")
             self.root.after(0, lambda: self.finish_phase_3(success_count, skipped_count, errors))
 
-        self.phase_3_btn = self.root.focus_get() # Identify which button was clicked
-        if hasattr(self, 'ai_btn'): self.ai_btn.config(state="disabled") # Simple way to block other actions
         threading.Thread(target=backup_task, daemon=True).start()
 
     def ask_folder_match_visual(self, product_code, original_target, parent_path, matches):
