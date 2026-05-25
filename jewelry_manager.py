@@ -290,7 +290,8 @@ class JewelryManagerApp:
         if not messagebox.askyesno("Confirm", f"Process {len(all_folders)} folders with Cloud AI Agent?"):
             return
 
-        self.ai_btn.config(state="disabled")
+        # Visual Feedback: Update button to show processing state
+        self.ai_btn.config(state="disabled", text="⌛ AI PROCESSING...", bg="#555")
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
@@ -298,13 +299,16 @@ class JewelryManagerApp:
             genai.configure(api_key=api_key)
         except Exception as e:
             self.log(f"API Error: {e}", "error", "E006")
-            self.ai_btn.config(state="normal"); return
+            # Restore button state
+            self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH", bg=self.colors["highlight"])
+            return
 
         self.progress['maximum'] = len(folder_paths)
         self.log("🚀 Gemini AI Agent is now retouching...", "highlight")
 
         for i, folder in enumerate(folder_paths):
             folder_name = os.path.basename(folder)
+            self.log(f"Processing {folder_name}...", "info")
             try:
                 files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
                 if not files: continue
@@ -313,14 +317,16 @@ class JewelryManagerApp:
                 p_type = folder_name[0].upper()
                 for f_path in files:
                     self.retouch_single_image_advanced(f_path, out_dir, p_type)
-                    self.log(f"Processed: {os.path.basename(f_path)}", "success")
+                    self.log(f"  > Done: {os.path.basename(f_path)}", "success")
                 if p_type == 'E' and len(files) >= 2:
                     self.merge_earring_views(files, out_dir, folder_name)
             except Exception as e:
                 self.log(f"Error {folder_name}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
+        
         self.log("Cloud Agent tasks complete.", "highlight")
-        self.ai_btn.config(state="normal")
+        # Restore button state
+        self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH", bg=self.colors["highlight"])
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
 
     def retouch_single_image_advanced(self, path, out_dir, p_type):
