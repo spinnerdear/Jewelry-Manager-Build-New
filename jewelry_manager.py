@@ -38,6 +38,7 @@ class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
         self.version = "2.0 Beta 6"
+
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
@@ -215,7 +216,7 @@ class JewelryManagerApp:
 
     def add_path_card(self, parent, label, var, is_config):
         card = tk.Frame(parent, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#333333"); card.pack(fill="x", pady=5)
-        # QA: Description Label fixed and clearly visible
+        # QA: Label visibility ensured
         tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         row = tk.Frame(card, bg=self.colors["card"]); row.pack(fill="x", pady=(5, 0))
         tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#121212", fg="#ffffff", relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
@@ -415,7 +416,13 @@ class JewelryManagerApp:
                     if os.path.splitext(f)[0] == f_n: main_f = f; break
                 if not main_f: sk_c += 1; continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")
-                t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {self.get_range(int(re.search(r'(\d+)', f_n).group(1))) if re.search(r'(\d+)', f_n) else 'Unknown'}")
+                # Fix f-string SyntaxError (remove backslash in expression part)
+                range_val = 0
+                match = re.search(r'(\d+)', f_n)
+                if match: range_val = int(match.group(1))
+                range_s = self.get_range(range_val) if range_val > 0 else 'Unknown'
+                t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {range_s}")
+                
                 t1, t2 = os.path.join(p1, t_r), os.path.join(p2, t_r)
                 if not os.path.exists(t1):
                     par = os.path.dirname(t1)
