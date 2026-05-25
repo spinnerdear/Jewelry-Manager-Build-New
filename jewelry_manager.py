@@ -363,14 +363,13 @@ class JewelryManagerApp:
             m = re.search(r'_(\d+)\.', f)
             if m and int(m.group(1)) > max_idx: max_idx = int(m.group(1)); suggested = f
         
-        # Visual Gallery Dialog
-        win = tk.Toplevel(self.root); win.title(f"Select Primary Photo: {folder_name}"); win.geometry("900x700"); win.configure(bg="#121212"); win.grab_set()
+        # Visual Gallery Dialog - Compact Mode
+        win = tk.Toplevel(self.root); win.title(f"Select Primary: {folder_name}"); win.geometry("1000x750"); win.configure(bg="#121212"); win.grab_set()
         result = tk.StringVar(value="")
 
-        tk.Label(win, text=f"SELECT PRIMARY PHOTO FOR: {folder_name}", fg=self.colors["accent"], bg="#121212", font=("Segoe UI", 12, "bold")).pack(pady=20)
+        tk.Label(win, text=f"PRIMARY PHOTO SELECTION: {folder_name}", fg=self.colors["accent"], bg="#121212", font=("Segoe UI", 11, "bold")).pack(pady=10)
         
-        scroll_frame = tk.Frame(win, bg="#121212")
-        scroll_frame.pack(fill="both", expand=True)
+        scroll_frame = tk.Frame(win, bg="#121212"); scroll_frame.pack(fill="both", expand=True, padx=5)
         canvas = tk.Canvas(scroll_frame, bg="#121212", highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(scroll_frame, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
         canvas.configure(yscrollcommand=scrollbar.set)
@@ -380,30 +379,29 @@ class JewelryManagerApp:
         
         def on_click(f): result.set(f); win.destroy()
 
-        cols = 3; r, c = 0, 0
-        photo_refs = [] # To prevent GC
+        cols = 5; r, c = 0, 0 # Increased columns to 5
+        photo_refs = [] 
+        thumb_size = (160, 160) # Smaller thumbnails for compact view
         
         for f in files:
             try:
-                img = Image.open(os.path.join(folder_path, f)); img.thumbnail((250, 250))
-                ph = ImageTk.PhotoImage(img)
-                photo_refs.append(ph)
+                img = Image.open(os.path.join(folder_path, f)); img.thumbnail(thumb_size)
+                ph = ImageTk.PhotoImage(img); photo_refs.append(ph)
                 
-                f_frame = tk.Frame(gallery, bg="#1e1e1e", padx=10, pady=10, highlightthickness=2, highlightbackground="#333333")
-                f_frame.grid(row=r, column=c, padx=15, pady=15)
+                f_frame = tk.Frame(gallery, bg="#1e1e1e", padx=5, pady=5, highlightthickness=1, highlightbackground="#333333")
+                f_frame.grid(row=r, column=c, padx=8, pady=8)
                 
                 lbl = tk.Label(f_frame, image=ph, bg="#1e1e1e", cursor="hand2")
                 lbl.pack()
                 lbl.bind("<Button-1>", lambda e, f=f: on_click(f))
                 
-                name_lbl = tk.Label(f_frame, text=f, fg="white", bg="#1e1e1e", font=("Arial", 8), width=25)
-                name_lbl.pack(pady=(5, 0))
+                name_lbl = tk.Label(f_frame, text=f[:18], fg="white", bg="#1e1e1e", font=("Arial", 7), width=18)
+                name_lbl.pack(pady=(2, 0))
                 
                 if f == suggested:
                     f_frame.config(highlightbackground=self.colors["accent"])
-                    tk.Label(f_frame, text="SUGGESTED", fg=self.colors["accent"], bg="#1e1e1e", font=("Arial", 7, "bold")).pack()
+                    tk.Label(f_frame, text="SUGGESTED", fg=self.colors["accent"], bg="#1e1e1e", font=("Arial", 6, "bold")).pack()
 
-                # Hover Effects for gallery frames
                 def on_gal_enter(e, fr=f_frame): fr.config(highlightbackground="#555555")
                 def on_gal_leave(e, fr=f_frame, is_sug=(f==suggested)): 
                     fr.config(highlightbackground=self.colors["accent"] if is_sug else "#333333")
@@ -414,8 +412,7 @@ class JewelryManagerApp:
                 if c >= cols: c = 0; r += 1
             except: pass
 
-        gallery.update_idletasks()
-        canvas.config(scrollregion=canvas.bbox("all"))
+        gallery.update_idletasks(); canvas.config(scrollregion=canvas.bbox("all"))
         self.root.wait_window(win)
         return result.get() if result.get() else suggested
 
