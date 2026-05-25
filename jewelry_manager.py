@@ -28,7 +28,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 5"
+        self.version = "2.0 Beta 6"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#121212")
