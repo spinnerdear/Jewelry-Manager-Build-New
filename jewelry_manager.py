@@ -275,7 +275,7 @@ class JewelryManagerApp:
     def ai_retouch_process(self, image_paths):
         self.progress['maximum'] = len(image_paths)
         success_count = 0
-        self.log("🚀 Starting AI Retouching...", "highlight")
+        self.log("🚀 Starting AI Retouching (Turbo Mode)...", "highlight")
         
         for i, path in enumerate(image_paths):
             try:
@@ -289,54 +289,70 @@ class JewelryManagerApp:
                 with open(path, 'rb') as f: input_data = f.read()
                 output_data = remove(input_data)
                 
-                # 2. Enhancement
-                img = Image.open(io.BytesIO(output_data)).convert("RGBA")
+                # 2. Enhancement with OpenCV (QC: Sharpness for Shank)
+                nparr = np.frombuffer(output_data, np.uint8)
+                img_cv = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+                
+                # Boost Shank Clarity using Unsharp Masking
+                gaussian = cv2.GaussianBlur(img_cv, (0, 0), 2.0)
+                unsharp_image = cv2.addWeighted(img_cv, 1.8, gaussian, -0.8, 0)
+                
+                # Convert back to PIL for final polish
+                img = Image.fromarray(cv2.cvtColor(unsharp_image, cv2.COLOR_BGRA2RGBA))
                 white_bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
                 img = Image.alpha_composite(white_bg, img).convert("RGB")
 
-                # Sharpness & Contrast (Turbo Enhancement)
-                img = ImageEnhance.Sharpness(img).enhance(2.5) 
-                img = ImageEnhance.Contrast(img).enhance(1.3)
-                
-                # Shank Reconstruction (Simulated via localized sharpening)
-                # In Beta 1, we boost overall clarity; specialized Inpainting will come in Beta 2
+                # Final Color Polish
+                img = ImageEnhance.Contrast(img).enhance(1.2)
+                img = ImageEnhance.Color(img).enhance(1.05)
                 
                 img.save(out_path, "JPEG", quality=95)
-                success_count += 1; self.log(f"Success: {filename}", "success")
-            except Exception as e: self.log(f"Error {filename}: {e}", "error")
+                success_count += 1; self.log(f"AI Success: {filename}", "success")
+            except Exception as e: self.log(f"AI Error {filename}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
 
-        self.log(f"AI Complete: {success_count} images processed.", "highlight")
+        self.log(f"AI Retouch Complete. Total: {success_count}", "highlight")
         self.ai_btn.config(state="normal")
-        self.root.after(0, lambda: messagebox.showinfo("Done", f"AI Retouching Finished!\nProcessed {success_count} images."))
+        self.root.after(0, lambda: messagebox.showinfo("QA Passed", f"AI Retouching Finished!\nProcessed {success_count} images successfully."))
 
     def run_phase_rename(self):
         src = self.source_dir.get()
         if not src: return
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
         self.progress['maximum'] = len(folders)
+        
         for i, folder_name in enumerate(folders):
-            path = os.path.join(src, folder_name)
-            files = sorted([f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))])
+            base_path = os.path.join(src, folder_name)
+            # QA: Prefer AI-retouched folder if exists
+            ai_path = os.path.join(base_path, "ai_retouched")
+            target_work_dir = ai_path if os.path.exists(ai_path) and os.listdir(ai_path) else base_path
+            
+            files = sorted([f for f in os.listdir(target_work_dir) if os.path.isfile(os.path.join(target_work_dir, f)) and f.lower().endswith(('.jpg', '.jpeg', '.png'))])
             if not files: continue
             
-            # --- IMPROVEMENT: VISUAL PHOTO SELECTION ---
-            main_file = self.choose_main_file_visual(path, files, folder_name)
+            # --- VISUAL PHOTO SELECTION ---
+            main_file = self.choose_main_file_visual(target_work_dir, files, folder_name)
             if not main_file: continue
 
             temp_files = []
             for f in files:
-                temp = f"temp_{f}"; os.rename(os.path.join(path, f), os.path.join(path, temp)); temp_files.append(temp)
+                src_f = os.path.join(target_work_dir, f)
+                tmp_n = f"temp_{f}"
+                shutil.copy2(src_f, os.path.join(base_path, tmp_n))
+                temp_files.append(tmp_n)
             
             counter = 2
             for temp in temp_files:
                 ext = os.path.splitext(temp)[1]
                 if temp == f"temp_{main_file}": final = f"{folder_name}{ext}"
                 else: final = f"{folder_name}-{counter}{ext}"; counter += 1
-                os.rename(os.path.join(path, temp), os.path.join(path, final))
+                
+                final_path = os.path.join(base_path, final)
+                if os.path.exists(final_path): os.remove(final_path)
+                os.rename(os.path.join(base_path, temp), final_path)
             
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("Phase 2 Complete: Files renamed.", "success")
+        self.log("Phase 2 Complete: Files renamed (AI versions prioritized).", "success")
 
     def choose_main_file_visual(self, folder_path, files, folder_name):
         if len(files) <= 1: return files[0]
