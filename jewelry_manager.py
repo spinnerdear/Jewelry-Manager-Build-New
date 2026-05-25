@@ -10,6 +10,15 @@ import difflib
 import threading
 import io
 import base64
+import sys
+
+# Standardize Output for Windows No-Console mode (Fixes 'NoneType' object has no attribute 'write')
+class NullWriter:
+    def write(self, s): pass
+    def flush(self): pass
+
+if sys.stdout is None: sys.stdout = NullWriter()
+if sys.stderr is None: sys.stderr = NullWriter()
 
 # Cloud AI support
 try:
@@ -42,7 +51,7 @@ class JewelryManagerApp:
             "E005": "ไดรฟ์ปลายทางไม่ได้เชื่อมต่อหรือออฟไลน์อยู่ (Drive Offline/Disconnected)",
             "E006": "เชื่อมต่อระบบ Cloud AI ล้มเหลว หรือ API Key ผิดพลาด",
             "E007": "เกิดปัญหาขณะก๊อปปี้ไฟล์ (Copy Operation Failed)",
-            "E999": "เกิดข้อผิดพลาดที่ไม่ทราบสาเหตุ (Unknown Error)"
+            "E999": "เกิดข้อผิดพลาดจากระบบภายใน (System Stream Error)"
         }
 
         # Config file path
@@ -59,21 +68,14 @@ class JewelryManagerApp:
         self.gemini_key = tk.StringVar(value="AIzaSyC1RKl0qM75kYQxhHZ4eEKgL7GCTfJ-aAQ")
         self.type_mapping = {}
         self.is_ai_running = False
+        self.anim_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+        self.anim_idx = 0
 
         # Colors
         self.colors = {
-            "bg": "#121212",
-            "card": "#1e1e1e",
-            "accent": "#00d1b2",
-            "accent_hover": "#00f2d3",
-            "text": "#ffffff",
-            "text_dim": "#888888",
-            "btn_default": "#333333",
-            "btn_hover": "#444444",
-            "success": "#00ffcc",
-            "error": "#ff3860",
-            "warning": "#ffdd57",
-            "highlight": "#209cee"
+            "bg": "#121212", "card": "#1e1e1e", "accent": "#00d1b2", "accent_hover": "#00f2d3",
+            "text": "#ffffff", "text_dim": "#aaaaaa", "btn_default": "#333333", "btn_hover": "#444444",
+            "success": "#00ffcc", "error": "#ff3860", "warning": "#ffdd57", "highlight": "#209cee"
         }
 
         self.load_settings()
@@ -114,11 +116,14 @@ class JewelryManagerApp:
         elif "สำเร็จ" in message or "Success" in message: tag = "success"; prefix = "✔ "
         elif "ข้าม" in message or "Skipped" in message or "ไม่พบ" in message: tag = "warning"; prefix = "⚠ "
         elif "ตรวจพบ" in message or "Highlight" in message: tag = "highlight"; prefix = "✨ "
+        
         msg_line = f"[{timestamp}] {prefix}{message}\n"
         self.log_area.insert(tk.END, f"[{timestamp}] ", "time")
         self.log_area.insert(tk.END, f"{prefix}{message}\n", tag)
         self.log_area.configure(state='disabled'); self.log_area.see(tk.END)
-        with open(self.history_log, "a", encoding="utf-8") as f: f.write(msg_line)
+        try:
+            with open(self.history_log, "a", encoding="utf-8") as f: f.write(msg_line)
+        except: pass
 
     def setup_dnd(self):
         self.source_entry.drop_target_register(DND_FILES)
@@ -140,10 +145,10 @@ class JewelryManagerApp:
         newest = os.path.join(downloads, candidates[0])
         if newest != self.source_dir.get():
             if messagebox.askyesno("New Folder Detected", f"Use latest folder in Downloads?\n{candidates[0]}"):
-                self.source_dir.set(newest)
-                self.log(f"Auto-selected: {candidates[0]}", "highlight")
+                self.source_dir.set(newest); self.log(f"Auto-selected: {candidates[0]}", "highlight")
 
     def create_widgets(self):
+        # Header
         header = tk.Frame(self.root, bg="#1a1a1f", height=120); header.pack(fill="x")
         tk.Label(header, text="JEWELRY MEDIA MANAGER", fg=self.colors["accent"], bg="#1a1a1f", font=("Segoe UI", 28, "bold")).pack(pady=(25, 0))
         tk.Label(header, text=f"CLOUD AI EDITION v{self.version}", fg=self.colors["text_dim"], bg="#1a1a1f", font=("Segoe UI", 10)).pack()
@@ -154,13 +159,13 @@ class JewelryManagerApp:
 
         # --- LEFT SIDE: CONFIGURATION ---
         tk.Label(left_side, text="CONFIGURATION", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 10))
-        self.add_path_card(left_side, "PHOTO 1 (MAIN DATABASE)", self.photo1_dir, True)
-        self.add_path_card(left_side, "PHOTO 2 (BACKUP DATABASE)", self.photo2_dir, True)
-        self.add_path_card(left_side, "ARCHIVE DRIVE", self.archive_dir, True)
+        self.add_path_card(left_side, "PHOTO 1 (MAIN DATABASE DRIVE)", self.photo1_dir, True)
+        self.add_path_card(left_side, "PHOTO 2 (BACKUP DATABASE DRIVE)", self.photo2_dir, True)
+        self.add_path_card(left_side, "ARCHIVE DRIVE (HISTORY STORAGE)", self.archive_dir, True)
         
         gemini_card = tk.Frame(left_side, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#444"); gemini_card.pack(fill="x", pady=5)
-        tk.Label(gemini_card, text="GEMINI API KEY (CLOUD AI)", fg=self.colors["highlight"], bg=self.colors["card"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        tk.Entry(gemini_card, textvariable=self.gemini_key, font=("Consolas", 9), bg="#121212", fg="#fff", relief="flat", show="*", insertbackground="white").pack(fill="x", pady=(5, 0), ipady=5)
+        tk.Label(gemini_card, text="GEMINI API KEY (CLOUD AI)", fg=self.colors["highlight"], bg=self.colors["card"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        tk.Entry(gemini_card, textvariable=self.gemini_key, font=("Consolas", 10), bg="#121212", fg="#fff", relief="flat", show="*", insertbackground="white").pack(fill="x", pady=(5, 0), ipady=5)
         self.gemini_key.trace_add("write", lambda *args: self.save_settings())
 
         self.create_styled_button(left_side, "⚙ MANAGE CATEGORIES", self.open_category_manager, self.colors["btn_default"], self.colors["accent"]).pack(fill="x", pady=15)
@@ -174,12 +179,12 @@ class JewelryManagerApp:
         tk.Label(right_side, text="WORKFLOW PROGRESS", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 10))
         self.create_styled_button(right_side, "1. GROUP BY CODE (4 DIGITS)", self.run_phase_1, "#2d2d2d", "white").pack(fill="x", pady=4)
         
-        # AI Button with Status Label
-        ai_frame = tk.Frame(right_side, bg=self.colors["bg"])
-        ai_frame.pack(fill="x", pady=4)
-        self.ai_btn = self.create_styled_button(ai_frame, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
+        # AI Button with Animation Status
+        ai_box = tk.Frame(right_side, bg=self.colors["bg"])
+        ai_box.pack(fill="x", pady=4)
+        self.ai_btn = self.create_styled_button(ai_box, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
         self.ai_btn.pack(side="left", fill="x", expand=True)
-        self.ai_status_label = tk.Label(ai_frame, text="", fg=self.colors["highlight"], bg=self.colors["bg"], font=("Consolas", 14, "bold"))
+        self.ai_status_label = tk.Label(ai_box, text="", fg=self.colors["highlight"], bg=self.colors["bg"], font=("Consolas", 18, "bold"))
         self.ai_status_label.pack(side="right", padx=10)
 
         self.create_styled_button(right_side, "2. RENAME FILES", self.run_phase_rename, "#2d2d2d", "white").pack(fill="x", pady=4)
@@ -191,35 +196,27 @@ class JewelryManagerApp:
         self.log_area = scrolledtext.ScrolledText(right_side, height=18, bg="#000000", fg="#dddddd", font=("Consolas", 10), relief="flat", padx=15, pady=15)
         self.log_area.pack(fill="both", expand=True, pady=(20, 0))
         self.log_area.configure(state='disabled')
-        self.log_area.tag_config("time", foreground="#444444")
-        self.log_area.tag_config("success", foreground=self.colors["success"])
-        self.log_area.tag_config("error", foreground=self.colors["error"])
-        self.log_area.tag_config("warning", foreground=self.colors["warning"])
-        self.log_area.tag_config("highlight", foreground=self.colors["highlight"])
-        self.log_area.tag_config("info", foreground="#ffffff")
+        self.log_area.tag_config("time", foreground="#444444"); self.log_area.tag_config("success", foreground=self.colors["success"]); self.log_area.tag_config("error", foreground=self.colors["error"]); self.log_area.tag_config("warning", foreground=self.colors["warning"]); self.log_area.tag_config("highlight", foreground=self.colors["highlight"]); self.log_area.tag_config("info", foreground="#ffffff")
 
-    def animate_ai_status(self):
-        chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-        idx = 0
-        while self.is_ai_running:
-            self.ai_status_label.config(text=chars[idx])
-            idx = (idx + 1) % len(chars)
-            self.root.update_idletasks()
-            threading.Event().wait(0.1)
-        self.ai_status_label.config(text="")
+    def animate_ai(self):
+        if self.is_ai_running:
+            self.ai_status_label.config(text=self.anim_chars[self.anim_idx])
+            self.anim_idx = (self.anim_idx + 1) % len(self.anim_chars)
+            self.root.after(100, self.animate_ai)
+        else:
+            self.ai_status_label.config(text="")
 
     def create_styled_button(self, parent, text, cmd, bg_color, fg_color):
         btn = tk.Button(parent, text=text, command=cmd, bg=bg_color, fg=fg_color, font=("Segoe UI", 10, "bold"), relief="flat", height=2)
-        def on_enter(e): 
-            if bg_color == self.colors["accent"]: btn.config(bg=self.colors["accent_hover"])
-            else: btn.config(bg=self.colors["btn_hover"])
+        def on_enter(e): btn.config(bg=self.colors["accent_hover"] if bg_color == self.colors["accent"] else self.colors["btn_hover"])
         def on_leave(e): btn.config(bg=bg_color)
         btn.bind("<Enter>", on_enter); btn.bind("<Leave>", on_leave)
         return btn
 
     def add_path_card(self, parent, label, var, is_config):
         card = tk.Frame(parent, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#333333"); card.pack(fill="x", pady=5)
-        tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        # QA: Description Label fixed and clearly visible
+        tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
         row = tk.Frame(card, bg=self.colors["card"]); row.pack(fill="x", pady=(5, 0))
         tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#121212", fg="#ffffff", relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
         tk.Button(row, text="...", command=lambda: self.browse_dir(var, is_config), bg="#333333", fg="white", relief="flat", width=4).pack(side="right", padx=(5, 0))
@@ -230,7 +227,7 @@ class JewelryManagerApp:
         if is_config: self.save_settings()
 
     def open_category_manager(self):
-        manager = tk.Toplevel(self.root); manager.title("Category Manager"); manager.geometry("500x650"); manager.configure(bg="#1a1a1f"); manager.grab_set()
+        manager = tk.Toplevel(self.root); manager.title("Categories"); manager.geometry("500x650"); manager.configure(bg="#1a1a1f"); manager.grab_set()
         tk.Label(manager, text="MANAGE CATEGORIES", fg=self.colors["accent"], bg="#1a1a1f", font=("Segoe UI", 14, "bold")).pack(pady=20)
         tree = ttk.Treeview(manager, columns=("Code", "Name"), show="headings", height=15); tree.heading("Code", text="Code"); tree.heading("Name", text="Name"); tree.pack(padx=20, fill="both", expand=True)
         def refresh():
@@ -238,12 +235,11 @@ class JewelryManagerApp:
             for c, n in sorted(self.type_mapping.items()): tree.insert("", "end", values=(c, n))
         refresh()
         ctrl = tk.Frame(manager, bg="#1a1a1f", pady=10); ctrl.pack(fill="x", padx=20)
-        c_ent = tk.Entry(ctrl, width=5); c_ent.grid(row=0, column=1, padx=5)
-        n_ent = tk.Entry(ctrl, width=15); n_ent.grid(row=0, column=3, padx=5)
+        c_ent = tk.Entry(ctrl, width=5); c_ent.grid(row=0, column=0); n_ent = tk.Entry(ctrl, width=15); n_ent.grid(row=0, column=1, padx=5)
         def add():
             c, n = c_ent.get().strip().upper(), n_ent.get().strip()
             if c and n: self.type_mapping[c] = n; self.save_settings(); refresh(); c_ent.delete(0, tk.END); n_ent.delete(0, tk.END)
-        self.create_styled_button(ctrl, "ADD", add, self.colors["accent"], "#121212").grid(row=0, column=4)
+        self.create_styled_button(ctrl, "ADD", add, self.colors["accent"], "#121212").grid(row=0, column=2)
         def delete():
             s = tree.selection()
             if s:
@@ -264,63 +260,47 @@ class JewelryManagerApp:
                 if not os.path.exists(t): os.makedirs(t)
                 shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log(f"Phase 1 Complete: Grouped {moved} files.", "success"); messagebox.showinfo("Done", "Grouped.")
+        self.log(f"Phase 1 Complete: Grouped {moved} files.", "success")
 
     def run_phase_ai_retouch(self):
-        if not HAS_GEMINI:
-            messagebox.showerror("Error", "Gemini library not found.")
-            return
+        if not HAS_GEMINI: messagebox.showerror("Error", "Gemini library not found."); return
         key = self.gemini_key.get()
-        if not key:
-            messagebox.showwarning("API Key Missing", "Please enter your Gemini API Key.")
-            return
+        if not key: messagebox.showwarning("API Key Missing", "Please enter your Gemini API Key."); return
         src = self.source_dir.get()
         if not src or not os.path.exists(src): return
         all_folders = [os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
-        if not all_folders:
-            messagebox.showinfo("Info", "Run Phase 1 first.")
-            return
-        if not messagebox.askyesno("Confirm", f"Process {len(all_folders)} folders with Cloud AI Agent?"):
-            return
+        if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
+        if not messagebox.askyesno("Confirm", f"Process {len(all_folders)} folders with Cloud AI Agent?"): return
 
         self.ai_btn.config(state="disabled", text="⌛ AI PROCESSING...")
-        self.is_ai_running = True
-        threading.Thread(target=self.animate_ai_status, daemon=True).start()
+        self.is_ai_running = True; self.anim_idx = 0; self.animate_ai()
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
-        try:
-            genai.configure(api_key=api_key)
-        except Exception as e:
-            self.log(f"API Error: {e}", "error", "E006")
-            self.stop_ai_vis(); return
+        try: genai.configure(api_key=api_key)
+        except Exception as e: self.log(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
 
         self.progress['maximum'] = len(folder_paths)
         self.log("🚀 Gemini AI Agent is now retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
-            folder_name = os.path.basename(folder)
-            self.log(f"Processing {folder_name}...", "info")
+            f_n = os.path.basename(folder); self.log(f"Processing {f_n}...", "info")
             try:
                 files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
                 if not files: continue
                 out_dir = os.path.join(folder, "ai_retouched")
                 if not os.path.exists(out_dir): os.makedirs(out_dir)
-                p_type = folder_name[0].upper()
-                for f_path in files:
-                    self.retouch_single_image_advanced(f_path, out_dir, p_type)
-                    self.log(f"  > Done: {os.path.basename(f_path)}", "success")
-                if p_type == 'E' and len(files) >= 2:
-                    self.merge_earring_views(files, out_dir, folder_name)
-            except Exception as e:
-                self.log(f"Error {folder_name}: {e}", "error")
+                p_t = f_n[0].upper()
+                for f_p in files:
+                    self.retouch_single_image_advanced(f_p, out_dir, p_t)
+                    self.log(f"  > Done: {os.path.basename(f_p)}", "success")
+                if p_t == 'E' and len(files) >= 2: self.merge_earring_views(files, out_dir, f_n)
+            except Exception as e: self.log(f"Error {f_n}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("Cloud Agent tasks complete.", "highlight")
-        self.stop_ai_vis()
+        self.log("Cloud Agent tasks complete.", "highlight"); self.stop_ai_vis()
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
 
     def stop_ai_vis(self):
-        self.is_ai_running = False
-        self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
+        self.is_ai_running = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
     def retouch_single_image_advanced(self, path, out_dir, p_type):
         import cv2
@@ -341,8 +321,7 @@ class JewelryManagerApp:
             img = ImageEnhance.Color(img).enhance(1.08)
             img = ImageEnhance.Brightness(img).enhance(1.02)
             img.save(out_path, "JPEG", quality=95)
-        except Exception as e:
-            self.log(f"Process Error {filename}: {e}", "error")
+        except Exception as e: self.log(f"Process Error {filename}: {e}", "error")
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
@@ -350,8 +329,7 @@ class JewelryManagerApp:
             composite = Image.new('RGB', (2400, 1200), (255, 255, 255))
             for i, im in enumerate(imgs):
                 im.thumbnail((1100, 1100))
-                x = 50 if i == 0 else 1250
-                y = (1200 - im.height) // 2
+                x = 50 if i == 0 else 1250; y = (1200 - im.height) // 2
                 composite.paste(im, (x, y))
             composite.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95)
             self.log(f"Merged view created for {folder_name}", "success")
@@ -428,8 +406,7 @@ class JewelryManagerApp:
             self.log("--- Starting Phase 3 ---", "highlight")
             for d_n, d_p in [("PHOTO 1", p1), ("PHOTO 2", p2)]:
                 dr = os.path.splitdrive(d_p)[0]
-                if dr and not os.path.exists(dr):
-                    self.log(f"{d_n} Offline", "error", "E005"); return
+                if dr and not os.path.exists(dr): self.log(f"{d_n} Offline", "error", "E005"); return
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             self.progress['maximum'] = len(folders); s_c, sk_c, errs = 0, 0, []
             for i, f_n in enumerate(folders):
@@ -438,10 +415,7 @@ class JewelryManagerApp:
                     if os.path.splitext(f)[0] == f_n: main_f = f; break
                 if not main_f: sk_c += 1; continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")
-                if "-VN-" in f_n.upper(): t_r = os.path.join("Vincentio", p_t)
-                else:
-                    m = re.search(r'(\d+)', f_n); range_s = self.get_range(int(m.group(1))) if m else "Unknown"
-                    t_r = os.path.join(p_t, f"{p_t} {range_s}")
+                t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {self.get_range(int(re.search(r'(\d+)', f_n).group(1))) if re.search(r'(\d+)', f_n) else 'Unknown'}")
                 t1, t2 = os.path.join(p1, t_r), os.path.join(p2, t_r)
                 if not os.path.exists(t1):
                     par = os.path.dirname(t1)
@@ -479,8 +453,7 @@ class JewelryManagerApp:
         tk.Button(win, text="USE SELECTED", command=on_select, bg=self.colors["accent"]).pack(pady=20)
         self.root.wait_window(win); return res.get()
 
-    def finish_phase_3(self, s, sk, e):
-        messagebox.showinfo("Done", f"Success: {s}, Skipped: {sk}")
+    def finish_phase_3(self, s, sk, e): messagebox.showinfo("Done", f"Success: {s}, Skipped: {sk}")
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
@@ -507,13 +480,6 @@ class JewelryManagerApp:
         add_box(p1, "P1"); add_box(p2, "P2"); add_box(n, "New")
         tk.Button(dialog, text="REPLACE", command=lambda: [res.set(True), dialog.destroy()]).pack(side="left"); tk.Button(dialog, text="SKIP", command=dialog.destroy).pack(side="right")
         self.root.wait_window(dialog); return res.get()
-
-    def add_path_card(self, parent, label, var, is_config):
-        card = tk.Frame(parent, bg=self.colors["card"], padx=15, pady=12, highlightthickness=1, highlightbackground="#333333"); card.pack(fill="x", pady=5)
-        tk.Label(card, text=label, fg=self.colors["text_dim"], bg=self.colors["card"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        row = tk.Frame(card, bg=self.colors["card"]); row.pack(fill="x", pady=(5, 0))
-        tk.Entry(row, textvariable=var, font=("Consolas", 9), bg="#121212", fg="#ffffff", relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
-        tk.Button(row, text="...", command=lambda: self.browse_dir(var, is_config), bg="#333333", fg="white", relief="flat", width=4).pack(side="right", padx=(5, 0))
 
 if __name__ == "__main__":
     if HAS_DND: root = TkinterDnD.Tk()
