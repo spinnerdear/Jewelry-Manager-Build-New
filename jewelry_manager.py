@@ -38,7 +38,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 16"
+        self.version = "2.0 Beta 17"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
@@ -68,11 +68,15 @@ class JewelryManagerApp:
         self.gemini_key = tk.StringVar(value="AIzaSyC1RKl0qM75kYQxhHZ4eEKgL7GCTfJ-aAQ")
         self.type_mapping = {}
         
+        # QC FIX: Standards mapping keys for animations
         self.process_states = {
-            "p1": tk.StringVar(value=""), "p1_5": tk.StringVar(value=""),
-            "p2": tk.StringVar(value=""), "p3": tk.StringVar(value=""), "p4": tk.StringVar(value="")
+            "phase1": tk.StringVar(value=""),
+            "phase1_5": tk.StringVar(value=""),
+            "phase2": tk.StringVar(value=""),
+            "phase3": tk.StringVar(value=""),
+            "phase4": tk.StringVar(value="")
         }
-        self.is_running = {"p1": False, "p1_5": False, "p2": False, "p3": False, "p4": False}
+        self.is_running = {"phase1": False, "phase1_5": False, "phase2": False, "phase3": False, "phase4": False}
         self.anim_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.anim_idx = 0
 
@@ -135,9 +139,7 @@ class JewelryManagerApp:
             char = self.anim_chars[self.anim_idx]
             self.anim_idx = (self.anim_idx + 1) % len(self.anim_chars)
             for k, v in self.is_running.items():
-                if v:
-                    key = k.replace('p1_5','phase1_5').replace('p1','phase1').replace('p2','phase2').replace('p3','phase3').replace('p4','phase4')
-                    if key in self.process_states: self.process_states[key].set(char)
+                if v: self.process_states[k].set(char)
         else:
             for v in self.process_states.values(): v.set("")
         self.root.after(100, self.start_animation_loop)
@@ -169,7 +171,7 @@ class JewelryManagerApp:
         left = tk.Frame(main, bg=self.colors["bg"]); left.pack(side="left", fill="both", expand=True, padx=(0, 25))
         right = tk.Frame(main, bg=self.colors["bg"]); right.pack(side="right", fill="both", expand=True, padx=(25, 0))
 
-        # LEFT SIDE
+        # --- LEFT: CONFIG ---
         tk.Label(left, text="SYSTEM CONFIGURATION", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_path_card(left, "PHOTO 1: MAIN DATABASE DRIVE", self.photo1_dir)
         self.add_path_card(left, "PHOTO 2: BACKUP DATABASE DRIVE", self.photo2_dir)
@@ -186,7 +188,7 @@ class JewelryManagerApp:
         self.source_entry = tk.Entry(w_f, textvariable=self.source_dir, font=("Consolas", 11), bg="#0f0f12", fg="#fff", relief="flat", highlightthickness=1, highlightbackground="#444", insertbackground="white"); self.source_entry.pack(fill="x", pady=(0, 15), ipady=10)
         self.create_styled_button(w_f, "BROWSE LOCAL FOLDER", lambda: self.browse_dir(self.source_dir, False), self.colors["accent"], "#0f0f12").pack(fill="x")
 
-        # RIGHT SIDE
+        # --- RIGHT: WORKFLOW ---
         tk.Label(right, text="PRODUCTION WORKFLOW", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_wf_step(right, "1. GROUP BY CODE", self.run_phase_1, "phase1")
         self.ai_btn = self.add_wf_step(right, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, "phase1_5", True)
@@ -202,7 +204,11 @@ class JewelryManagerApp:
         f = tk.Frame(parent, bg=self.colors["bg"]); f.pack(fill="x", pady=5)
         btn = self.create_styled_button(f, text, cmd, self.colors["highlight"] if is_ai else self.colors["btn_default"], "#121212" if is_ai else "#fff")
         btn.pack(side="left", fill="x", expand=True)
-        tk.Label(f, textvariable=self.process_states[state_key], fg=self.colors["accent"], bg=self.colors["bg"], font=("Consolas", 18, "bold"), width=2).pack(side="right", padx=10)
+        
+        # QC SAFE ACCESS: Check if state_key exists in process_states
+        state_var = self.process_states.get(state_key)
+        if state_var:
+            tk.Label(f, textvariable=state_var, fg=self.colors["accent"], bg=self.colors["bg"], font=("Consolas", 18, "bold"), width=2).pack(side="right", padx=10)
         return btn
 
     def add_path_card(self, parent, label, var):
@@ -248,7 +254,7 @@ class JewelryManagerApp:
         if not src or not os.path.exists(src): return
         files = [f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f))]
         def task():
-            self.is_running["p1"] = True; moved = 0
+            self.is_running["phase1"] = True; moved = 0
             for i, f in enumerate(files):
                 m = re.search(r'(\d{4})', f)
                 if m:
@@ -257,7 +263,7 @@ class JewelryManagerApp:
                     try: shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
                     except: pass
                 self.progress['value'] = (i+1)/len(files)*100
-            self.log(f"Phase 1: Grouped {moved} files.", "success"); self.is_running["p1"] = False
+            self.log(f"Phase 1: Grouped {moved} files.", "success"); self.is_running["phase1"] = False
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_ai_retouch(self):
@@ -270,7 +276,7 @@ class JewelryManagerApp:
         if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
         if not messagebox.askyesno("Confirm", "🚀 Start Selective Google Cloud AI Retouching?"): return
 
-        self.ai_btn.config(state="disabled", text="⌛ CLOUD PROCESSING..."); self.is_running["p1_5"] = True
+        self.ai_btn.config(state="disabled", text="⌛ CLOUD PROCESSING..."); self.is_running["phase1_5"] = True
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
@@ -296,7 +302,6 @@ class JewelryManagerApp:
                     self.log(f"  > AI Success: {f_p}", "success")
                 
                 if p_t == 'E' and len(files_to_ai) >= 2:
-                    # Merge only the newly created AI versions
                     ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
                     self.merge_earring_views(ai_paths, folder, f_n)
             except Exception as e: self.log(f"Error {f_n}: {e}", "error")
@@ -316,7 +321,7 @@ class JewelryManagerApp:
         return {"brightness": 1.05, "contrast": 1.2, "sharpness": 2.2}
 
     def stop_ai_vis(self):
-        self.is_running["p1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
+        self.is_running["phase1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
     def retouch_high_fidelity(self, path, out_dir, p_type, plan):
         filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
@@ -324,7 +329,7 @@ class JewelryManagerApp:
             img = Image.open(path).convert("RGB")
             img = ImageOps.autocontrast(img, cutoff=1)
             img = ImageEnhance.Brightness(img).enhance(plan.get('brightness', 1.05))
-            img = ImageEnhance.Contrast(img).enhance(plan.get('contrast', 1.2))
+            img = ImageEnhance.Contrast(img).enhance(1.2)
             s_val = plan.get('sharpness', 2.2)
             if p_type == 'R': s_val *= 1.2
             img = ImageEnhance.Sharpness(img).enhance(s_val)
@@ -348,13 +353,13 @@ class JewelryManagerApp:
         if not src: return
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
         def task():
-            self.is_running["p2"] = True
+            self.is_running["phase2"] = True
             for i, folder_name in enumerate(folders):
                 base_path = os.path.join(src, folder_name)
                 files = sorted([f for f in os.listdir(base_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
                 if files: self.root.after(0, lambda f=files, n=folder_name, b=base_path: self.process_rename_visual(b, f, n, b))
                 self.progress['value'] = (i+1)/len(folders)*100
-            self.is_running["p2"] = False
+            self.is_running["phase2"] = False
         threading.Thread(target=task, daemon=True).start()
 
     def process_rename_visual(self, work_dir, files, folder_name, base_path):
@@ -395,7 +400,7 @@ class JewelryManagerApp:
         src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
         if not all([src, p1, p2]): messagebox.showwarning("Warning", "Check config."); return
         def task():
-            self.is_running["p3"] = True; s_c = 0
+            self.is_running["phase3"] = True; s_c = 0
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             for i, f_n in enumerate(folders):
                 f_p = os.path.join(src, f_n)
@@ -411,21 +416,21 @@ class JewelryManagerApp:
                             try: shutil.copy2(os.path.join(f_p, f), os.path.join(t_dir, f)); s_c += 1
                             except: pass
                 self.progress['value'] = (i+1)/len(folders)*100
-            self.log(f"Phase 3: Collected {s_c} files.", "success"); self.is_running["p3"] = False
+            self.log(f"Phase 3: Collected {s_c} files.", "success"); self.is_running["phase3"] = False
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
         if not all([src, arc]): return
         def task():
-            self.is_running["p4"] = True
+            self.is_running["phase4"] = True
             now = datetime.now(); path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
             os.makedirs(path, exist_ok=True)
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
             for f_n in folders:
                 try: shutil.move(os.path.join(src, f_n), os.path.join(path, f_n))
                 except: pass
-            self.log("Phase 4: Archived.", "success"); self.is_running["p4"] = False
+            self.log("Phase 4: Archived.", "success"); self.is_running["phase4"] = False
         threading.Thread(target=task, daemon=True).start()
 
 if __name__ == "__main__":
