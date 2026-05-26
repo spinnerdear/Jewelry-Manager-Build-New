@@ -2,7 +2,7 @@
 
 เครื่องมืออัจฉริยะระดับมืออาชีพสำหรับจัดการและรีทัชรูปภาพสินค้าเครื่องประดับ (Kh Creation Standards) ขับเคลื่อนด้วยพลังของ **Gemini AI Cloud Agent**
 
-## 🌟 คุณสมบัติเด่น (v2.0 Beta 4)
+## 🌟 คุณสมบัติเด่น (v2.0 Beta 19)
 
 ### 🤖 ระบบ Cloud AI Agent (ขั้นตอนที่ 1.5)
 เปลี่ยนรูปถ่ายดิบให้กลายเป็นรูปสตูดิโอพรีเมียมโดยอัตโนมัติ:
@@ -28,15 +28,21 @@
 5.  **MOVE TO ARCHIVE:** ย้ายงานที่เสร็จแล้วเข้าคลังประวัติ
 
 ## ⚙️ การตั้งค่าระบบ
-- **API Key:** ระบบฝัง API Key มาให้พร้อมใช้งานในตัว (v2.0+)
+- **API Key:** ตั้งค่าได้ผ่าน environment variable `GOOGLE_API_KEY` หรือกรอกในช่อง Google Cloud API Key ในโปรแกรม ห้าม commit key จริงลง repo
 - **Path Config:** รองรับไดรฟ์เครือข่าย (เช่น X:, Z:) พร้อมระบบเช็คสถานะการเชื่อมต่ออัตโนมัติ
 
 ## 🛠 ความต้องการของระบบ (สำหรับการพัฒนา)
 - **Python 3.10+**
-- **Libraries:** `google-generativeai`, `rembg`, `opencv-python`, `pillow`, `onnxruntime`
+- **Libraries:** ดูรายการเต็มใน `requirements.txt`
   ```bash
-  pip install google-generativeai rembg opencv-python pillow onnxruntime
+  pip install -r requirements.txt
   ```
+
+## 🤝 การทำงานร่วมกับ AI Tools
+
+- ใช้ `/Users/ksdear/Documents/JewelryManager` เป็น workspace หลัก
+- ก่อนให้ Codex หรือ Gemini CLI ทำงานต่อ ให้อ่าน `HANDOFF.md`
+- หลังแก้ไข ให้เพิ่มบันทึกใน `HANDOFF.md` พร้อมไฟล์ที่แก้และคำสั่งทดสอบที่รัน
 
 ---
 *ยกระดับมาตรฐานรูปภาพสินค้า Kh Creation ด้วยเทคโนโลยี AI Generative ล่าสุด*

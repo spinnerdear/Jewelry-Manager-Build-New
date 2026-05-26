@@ -1,1 +1,8 @@
-Pillow\npyinstaller\ntkinterdnd2
+Pillow
+pyinstaller
+tkinterdnd2
+google-generativeai
+rembg
+opencv-python
+numpy
+onnxruntime

@@ -3,10 +3,10 @@
 โปรเจคนี้เป็นเครื่องมือเตรียมรูปสินค้า (Retouching & Organizing) สำหรับ Kh Creation โดยใช้เทคโนโลยี Cloud AI และระบบจัดการไฟล์อัตโนมัติ
 
 ## 🏗 Architectural Overview
-- **Version:** v2.0 Beta (Cloud AI Edition)
+- **Version:** v2.0 Beta 19 (Cloud AI Edition)
 - **Primary AI Agent:** Google Gemini 1.5 Flash (API Integration)
 - **GUI:** Tkinter (Custom Dark Theme)
-- **Libraries:** `google-generativeai`, `rembg`, `opencv-python`, `pillow`
+- **Libraries:** `google-generativeai`, `rembg`, `opencv-python`, `numpy`, `onnxruntime`, `pillow`, `tkinterdnd2`
 - **Deployment Strategy:** Unified Release (Single Commit) via GitHub Actions
 
 ## 🎯 AI Retouching Standards (Critical Checklist)
@@ -28,6 +28,8 @@
 - **Lazy Loading:** โหลดไลบรารี AI เฉพาะเมื่อมีการเรียกใช้งานครั้งแรก เพื่อลดเวลาการเปิดโปรแกรม
 - **Non-blocking UI:** กระบวนการหนัก (AI, Copying) ต้องรันบน `threading.Thread` เพื่อป้องกันหน้าจอ GUI ค้าง
 - **File System:** ใช้ `os.path.normpath` และจัดการปัญหา "File already exists" บน Windows โดยการลบไฟล์เดิมก่อน Rename
+- **Secrets:** ห้ามฝัง API key/token ใน source code หรือ README ให้ใช้ environment variable `GOOGLE_API_KEY` หรือกรอกผ่าน UI เท่านั้น
+- **Handoff:** ก่อนเริ่มงานให้อ่าน `HANDOFF.md` และเมื่อทำเสร็จให้เพิ่มบันทึกว่าแก้อะไร ทดสอบอะไร และยังเหลือ risk อะไร
 
 ---
-*อัปเดตล่าสุด: v2.0 Beta 3 - Kh Creation Cloud AI Standards*
+*อัปเดตล่าสุด: 2026-05-26 - v2.0 Beta 19 QA/QC handoff rules*

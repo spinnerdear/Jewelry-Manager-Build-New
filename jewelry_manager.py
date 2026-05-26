@@ -15,11 +15,10 @@ import json
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
-from PIL import Image, ImageTk, ImageEnhance, ImageFilter, ImageOps
-import difflib
+from PIL import Image, ImageTk, ImageEnhance, ImageOps
 import threading
-import io
-import base64
+
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 
 # Cloud AI support
 try:
@@ -75,9 +74,9 @@ class JewelryManagerApp:
         self.photo1_dir = tk.StringVar()
         self.photo2_dir = tk.StringVar()
         self.archive_dir = tk.StringVar()
-        self.gemini_key = tk.StringVar(value="AIzaSyC1RKl0qM75kYQxhHZ4eEKgL7GCTfJ-aAQ")
+        self.gemini_key = tk.StringVar(value=os.environ.get("GOOGLE_API_KEY", ""))
         self.type_mapping = {}
-        
+
         # QC FIX: Standards mapping keys for animations
         self.process_states = {
             "phase1": tk.StringVar(value=""),
@@ -113,7 +112,9 @@ class JewelryManagerApp:
                     self.archive_dir.set(data.get('archive', ''))
                     if data.get('gemini_key'): self.gemini_key.set(data.get('gemini_key'))
                     self.type_mapping = data.get('types', default_types)
-            except: self.type_mapping = default_types
+            except Exception as e:
+                self.type_mapping = default_types
+                print(f"Failed to load settings: {e}")
         else: self.type_mapping = default_types
 
     def save_settings(self):
@@ -142,7 +143,27 @@ class JewelryManagerApp:
         self.log_area.configure(state='disabled'); self.log_area.see(tk.END)
         try:
             with open(self.history_log, "a", encoding="utf-8") as f: f.write(msg_line)
-        except: pass
+        except Exception as e:
+            print(f"Failed to write history log: {e}")
+
+    def log_threadsafe(self, message, category="info", code=None):
+        self.root.after(0, lambda: self.log(message, category, code))
+
+    def set_progress_threadsafe(self, value, maximum=None):
+        def update():
+            if maximum is not None:
+                self.progress['maximum'] = maximum
+            self.progress['value'] = value
+        self.root.after(0, update)
+
+    def set_running(self, phase, running):
+        self.root.after(0, lambda: self.is_running.__setitem__(phase, running))
+
+    def set_ai_button(self, state, text):
+        self.root.after(0, lambda: self.ai_btn.config(state=state, text=text))
+
+    def is_image_file(self, filename):
+        return filename.lower().endswith(IMAGE_EXTENSIONS)
 
     def start_animation_loop(self):
         if any(self.is_running.values()):
@@ -214,7 +235,7 @@ class JewelryManagerApp:
         f = tk.Frame(parent, bg=self.colors["bg"]); f.pack(fill="x", pady=5)
         btn = self.create_styled_button(f, text, cmd, self.colors["highlight"] if is_ai else self.colors["btn_default"], "#121212" if is_ai else "#fff")
         btn.pack(side="left", fill="x", expand=True)
-        
+
         # QC SAFE ACCESS: Check if state_key exists in process_states
         state_var = self.process_states.get(state_key)
         if state_var:
@@ -261,64 +282,73 @@ class JewelryManagerApp:
 
     def run_phase_1(self):
         src = self.source_dir.get()
-        if not src or not os.path.exists(src): return
+        if not src or not os.path.exists(src):
+            messagebox.showerror("Error", self.error_codes["E001"])
+            return
         files = [f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f))]
+        if not files:
+            messagebox.showinfo("Info", self.error_codes["E002"])
+            return
         def task():
-            self.is_running["phase1"] = True; moved = 0
+            self.set_running("phase1", True); moved = 0
             for i, f in enumerate(files):
                 m = re.search(r'(\d{4})', f)
                 if m:
                     c = m.group(1); t = os.path.join(src, c)
                     if not os.path.exists(t): os.makedirs(t)
-                    try: shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
-                    except: pass
-                self.progress['value'] = (i+1)/len(files)*100
-            self.log(f"Phase 1: Grouped {moved} files.", "success"); self.is_running["phase1"] = False
+                    try:
+                        shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
+                    except Exception as e:
+                        self.log_threadsafe(f"Move failed for {f}: {e}", "error", "E007")
+                self.set_progress_threadsafe((i+1)/len(files)*100)
+            self.log_threadsafe(f"Phase 1: Grouped {moved} files.", "success"); self.set_running("phase1", False)
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_ai_retouch(self):
         if not HAS_GEMINI: messagebox.showerror("Error", "Google AI libraries not found."); return
-        key = self.gemini_key.get()
+        key = self.gemini_key.get().strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
         if not key: messagebox.showwarning("API Key Missing", "Enter Google API Key."); return
         src = self.source_dir.get()
-        if not src or not os.path.exists(src): return
+        if not src or not os.path.exists(src):
+            messagebox.showerror("Error", self.error_codes["E001"])
+            return
         all_folders = [os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
         if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
         if not messagebox.askyesno("Confirm", "🚀 Start Advanced Google Cloud AI Retouching? (Pure White & Detail Focus)"): return
 
-        self.ai_btn.config(state="disabled", text="⌛ CLOUD PROCESSING..."); self.is_running["phase1_5"] = True
+        self.set_ai_button("disabled", "⌛ CLOUD PROCESSING..."); self.set_running("phase1_5", True)
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
         try: genai.configure(api_key=api_key)
-        except Exception as e: self.log(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
+        except Exception as e: self.log_threadsafe(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
 
-        self.progress['maximum'] = len(folder_paths)
-        self.log("🚀 AI is performing High-Fidelity Retouching...", "highlight")
+        self.set_progress_threadsafe(0, len(folder_paths))
+        self.log_threadsafe("AI is performing High-Fidelity Retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
-            f_n = os.path.basename(folder); self.log(f"Processing {f_n}...", "info")
+            f_n = os.path.basename(folder); self.log_threadsafe(f"Processing {f_n}...", "info")
             try:
-                all_files = sorted([f for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png')) and "_AI" not in f])
+                all_files = sorted([f for f in os.listdir(folder) if self.is_image_file(f) and "_AI" not in f])
                 if not all_files: continue
                 p_t = f_n[0].upper()
-                
+
                 # Rule: Earring 2 images, Others 1 image
                 limit = 2 if p_t == 'E' else 1
                 files_to_ai = all_files[:limit]
-                
+
                 # Use Gemini for Analysis (Contextual Planning)
                 plan = self.get_ai_vision_plan(os.path.join(folder, files_to_ai[0]), p_t, api_key)
                 
                 for f_p in files_to_ai:
                     self.retouch_professional(os.path.join(folder, f_p), folder, p_t, plan)
-                    self.log(f"  > AI Retouched: {f_p}", "success")
+                    self.log_threadsafe(f"  > AI Retouched: {f_p}", "success")
                 
                 if p_t == 'E' and len(files_to_ai) >= 2:
                     ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
                     self.merge_earring_views(ai_paths, folder, f_n)
-            except Exception as e: self.log(f"Error {f_n}: {e}", "error")
-            self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
+            except Exception as e: self.log_threadsafe(f"Error {f_n}: {e}", "error")
+            self.set_progress_threadsafe(i + 1)
+        self.log_threadsafe("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished."))
 
     def get_ai_vision_plan(self, img_path, p_type, key):
@@ -329,11 +359,12 @@ class JewelryManagerApp:
             response = model.generate_content([prompt, img])
             match = re.search(r'\{.*\}', response.text, re.DOTALL)
             if match: return json.loads(match.group(0))
-        except: pass
+        except Exception as e:
+            self.log_threadsafe(f"AI planning fallback for {os.path.basename(img_path)}: {e}", "warning")
         return {"brightness": 1.1, "contrast": 1.2, "sharpness": 2.5, "focus_area": "auto"}
 
     def stop_ai_vis(self):
-        self.is_running["phase1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
+        self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 CLOUD AI RETOUCH")
 
     def retouch_professional(self, path, out_dir, p_type, plan):
         filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
@@ -362,15 +393,15 @@ class JewelryManagerApp:
             img_pil = ImageOps.autocontrast(img_pil, cutoff=0.5)
             img_pil = ImageEnhance.Brightness(img_pil).enhance(plan.get('brightness', 1.1))
             img_pil = ImageEnhance.Contrast(img_pil).enhance(plan.get('contrast', 1.2))
-            
+
             s_val = plan.get('sharpness', 2.5)
             if p_type == 'R': s_val *= 1.3 # Shank Sharpener
             img_pil = ImageEnhance.Sharpness(img_pil).enhance(s_val)
-            
+
             # 4. Final Polish & Save (Optimized File Size)
             img_pil.save(out_path, "JPEG", quality=88, optimize=True, subsampling=0)
         except Exception as e:
-            # Fallback
+            self.log_threadsafe(f"Retouch fallback for {filename}: {e}", "warning")
             img_pil = Image.open(path).convert("RGB")
             img_pil.save(out_path, "JPEG", quality=85)
 
@@ -383,36 +414,58 @@ class JewelryManagerApp:
                 x = 100 if i == 0 else 1300; y = (1200 - im.height) // 2
                 composite.paste(im, (x, y))
             composite.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=90, optimize=True)
-        except: pass
+        except Exception as e:
+            self.log_threadsafe(f"Earring montage failed for {folder_name}: {e}", "error", "E999")
 
     def run_phase_rename(self):
         src = self.source_dir.get()
-        if not src: return
+        if not src or not os.path.exists(src):
+            messagebox.showerror("Error", self.error_codes["E001"])
+            return
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
+        if not folders:
+            messagebox.showinfo("Info", "No folders found. Run Phase 1 first.")
+            return
         def task():
-            self.is_running["phase2"] = True
+            self.set_running("phase2", True)
             for i, folder_name in enumerate(folders):
                 base_path = os.path.join(src, folder_name)
-                files = sorted([f for f in os.listdir(base_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+                files = sorted([f for f in os.listdir(base_path) if self.is_image_file(f)])
                 if files: self.root.after(0, lambda f=files, n=folder_name, b=base_path: self.process_rename_visual(b, f, n, b))
-                self.progress['value'] = (i+1)/len(folders)*100
-            self.is_running["phase2"] = False
+                self.set_progress_threadsafe((i+1)/len(folders)*100)
+            self.set_running("phase2", False)
         threading.Thread(target=task, daemon=True).start()
 
     def process_rename_visual(self, work_dir, files, folder_name, base_path):
         main_file = self.choose_main_file_visual(work_dir, files, folder_name)
         if not main_file: return
-        temp_dir = os.path.join(base_path, "_rename_temp"); os.makedirs(temp_dir, exist_ok=True)
-        for f in files: shutil.move(os.path.join(base_path, f), os.path.join(temp_dir, f))
-        for f in os.listdir(base_path):
-            if f.lower().endswith(('.jpg', '.jpeg', '.png')): os.remove(os.path.join(base_path, f))
-        counter = 2
-        for f in files:
-            ext = os.path.splitext(f)[1].lower()
-            final = f"{folder_name}{ext}" if f == main_file else f"{folder_name}-{counter}{ext}"
-            if f != main_file: counter += 1
-            shutil.copy2(os.path.join(temp_dir, f), os.path.join(base_path, final))
-        shutil.rmtree(temp_dir); self.log(f"Renamed: {folder_name}", "success")
+        temp_dir = os.path.join(base_path, "_rename_temp")
+        if os.path.exists(temp_dir):
+            self.log(f"Rename temp folder already exists for {folder_name}; skipped to avoid overwriting recovery files.", "error", "E007")
+            return
+        try:
+            os.makedirs(temp_dir)
+            planned_names = {}
+            counter = 2
+            for f in files:
+                ext = os.path.splitext(f)[1].lower()
+                final = f"{folder_name}{ext}" if f == main_file else f"{folder_name}-{counter}{ext}"
+                if f != main_file: counter += 1
+                planned_names[f] = final
+
+            for f in files:
+                shutil.move(os.path.join(base_path, f), os.path.join(temp_dir, f))
+
+            for original, final in planned_names.items():
+                final_path = os.path.join(base_path, final)
+                if os.path.exists(final_path):
+                    os.replace(final_path, os.path.join(temp_dir, f"existing_{final}"))
+                shutil.copy2(os.path.join(temp_dir, original), final_path)
+
+            shutil.rmtree(temp_dir)
+            self.log(f"Renamed: {folder_name}", "success")
+        except Exception as e:
+            self.log(f"Rename failed for {folder_name}: {e}. Recovery files remain in _rename_temp.", "error", "E007")
 
     def choose_main_file_visual(self, folder_path, files, folder_name):
         if len(files) <= 1: return files[0]
@@ -426,7 +479,8 @@ class JewelryManagerApp:
                 img = Image.open(os.path.join(folder_path, f)); img.thumbnail((160, 160)); ph = ImageTk.PhotoImage(img); photo_refs.append(ph)
                 lbl = tk.Label(gal, image=ph, bg="#1e1e1e", cursor="hand2"); lbl.grid(row=i//5, column=i%5, padx=8, pady=8)
                 lbl.bind("<Button-1>", lambda e, f=f: [res.set(f), win.destroy()])
-            except: pass
+            except Exception as e:
+                self.log(f"Preview skipped for {f}: {e}", "warning")
         self.root.wait_window(win); return res.get() if res.get() else files[0]
 
     def get_range(self, num):
@@ -436,38 +490,48 @@ class JewelryManagerApp:
     def run_phase_backup(self):
         src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
         if not all([src, p1, p2]): messagebox.showwarning("Warning", "Check config."); return
+        missing = [p for p in [src, p1, p2] if not os.path.exists(p)]
+        if missing:
+            messagebox.showerror("Error", f"{self.error_codes['E005']}\n" + "\n".join(missing))
+            return
         def task():
-            self.is_running["phase3"] = True; s_c = 0
+            self.set_running("phase3", True); s_c = 0
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             for i, f_n in enumerate(folders):
                 f_p = os.path.join(src, f_n)
-                files_to_copy = [f for f in os.listdir(f_p) if f.startswith(f_n) and f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+                files_to_copy = [f for f in os.listdir(f_p) if f.startswith(f_n) and self.is_image_file(f)]
                 if not files_to_copy: continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")
                 m = re.search(r'(\d+)', f_n); r_v = int(m.group(1)) if m else 0
                 t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {self.get_range(r_v)}")
                 for dest_base in [p1, p2]:
                     t_dir = os.path.join(dest_base, t_r)
-                    if os.path.exists(t_dir):
+                    try:
+                        os.makedirs(t_dir, exist_ok=True)
                         for f in files_to_copy:
-                            try: shutil.copy2(os.path.join(f_p, f), os.path.join(t_dir, f)); s_c += 1
-                            except: pass
-                self.progress['value'] = (i+1)/len(folders)*100
-            self.log(f"Phase 3: Collected {s_c} files.", "success"); self.is_running["phase3"] = False
+                            shutil.copy2(os.path.join(f_p, f), os.path.join(t_dir, f)); s_c += 1
+                    except Exception as e:
+                        self.log_threadsafe(f"Copy failed for {f_n} to {t_dir}: {e}", "error", "E007")
+                self.set_progress_threadsafe((i+1)/len(folders)*100)
+            self.log_threadsafe(f"Phase 3: Collected {s_c} files.", "success"); self.set_running("phase3", False)
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
-        if not all([src, arc]): return
+        if not all([src, arc]) or not os.path.exists(src):
+            messagebox.showerror("Error", self.error_codes["E001"])
+            return
         def task():
-            self.is_running["phase4"] = True
+            self.set_running("phase4", True)
             now = datetime.now(); path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
             os.makedirs(path, exist_ok=True)
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
             for f_n in folders:
-                try: shutil.move(os.path.join(src, f_n), os.path.join(path, f_n))
-                except: pass
-            self.log("Phase 4: Archived.", "success"); self.is_running["phase4"] = False
+                try:
+                    shutil.move(os.path.join(src, f_n), os.path.join(path, f_n))
+                except Exception as e:
+                    self.log_threadsafe(f"Archive failed for {f_n}: {e}", "error", "E007")
+            self.log_threadsafe("Phase 4: Archived.", "success"); self.set_running("phase4", False)
         threading.Thread(target=task, daemon=True).start()
 
 if __name__ == "__main__":
