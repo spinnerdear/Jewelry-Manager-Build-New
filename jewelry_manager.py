@@ -28,6 +28,15 @@ try:
 except ImportError:
     HAS_GEMINI = False
 
+# AI Retouching libraries
+try:
+    from rembg import remove
+    import cv2
+    import numpy as np
+    HAS_AI_TOOLS = True
+except ImportError:
+    HAS_AI_TOOLS = False
+
 # Drag and Drop support
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
@@ -38,8 +47,9 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 17"
+        self.version = "2.0 Beta 19"
         self.root.title(f"Jewelry Media Manager v{self.version}")
+
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
 
@@ -274,7 +284,7 @@ class JewelryManagerApp:
         if not src or not os.path.exists(src): return
         all_folders = [os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
         if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
-        if not messagebox.askyesno("Confirm", "🚀 Start Selective Google Cloud AI Retouching?"): return
+        if not messagebox.askyesno("Confirm", "🚀 Start Advanced Google Cloud AI Retouching? (Pure White & Detail Focus)"): return
 
         self.ai_btn.config(state="disabled", text="⌛ CLOUD PROCESSING..."); self.is_running["phase1_5"] = True
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
@@ -284,9 +294,9 @@ class JewelryManagerApp:
         except Exception as e: self.log(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
 
         self.progress['maximum'] = len(folder_paths)
-        self.log("🚀 Google Cloud AI is selectively retouching...", "highlight")
+        self.log("🚀 AI is performing High-Fidelity Retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
-            f_n = os.path.basename(folder); self.log(f"Analyzing {f_n}...", "info")
+            f_n = os.path.basename(folder); self.log(f"Processing {f_n}...", "info")
             try:
                 all_files = sorted([f for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png')) and "_AI" not in f])
                 if not all_files: continue
@@ -295,47 +305,74 @@ class JewelryManagerApp:
                 # Rule: Earring 2 images, Others 1 image
                 limit = 2 if p_t == 'E' else 1
                 files_to_ai = all_files[:limit]
+                
+                # Use Gemini for Analysis (Contextual Planning)
                 plan = self.get_ai_vision_plan(os.path.join(folder, files_to_ai[0]), p_t, api_key)
                 
                 for f_p in files_to_ai:
-                    self.retouch_high_fidelity(os.path.join(folder, f_p), folder, p_t, plan)
-                    self.log(f"  > AI Success: {f_p}", "success")
+                    self.retouch_professional(os.path.join(folder, f_p), folder, p_t, plan)
+                    self.log(f"  > AI Retouched: {f_p}", "success")
                 
                 if p_t == 'E' and len(files_to_ai) >= 2:
                     ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
                     self.merge_earring_views(ai_paths, folder, f_n)
             except Exception as e: self.log(f"Error {f_n}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("Selective AI tasks complete.", "highlight"); self.stop_ai_vis()
-        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
+        self.log("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
+        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished."))
 
     def get_ai_vision_plan(self, img_path, p_type, key):
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
             img = Image.open(img_path); img.thumbnail((512, 512))
-            prompt = f"Analyze jewelry {p_type}. Return JSON: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5}}"
+            prompt = f"Expert Jewelry Retoucher: Analyze this {p_type}. Check for dust, shank blur, and hanger. Suggest Brightness (0.8-1.4), Contrast (1.0-1.5), and Sharpness (1.0-4.0). Return JSON ONLY: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5, \"focus_area\": \"shank\"}}"
             response = model.generate_content([prompt, img])
             match = re.search(r'\{.*\}', response.text, re.DOTALL)
             if match: return json.loads(match.group(0))
         except: pass
-        return {"brightness": 1.05, "contrast": 1.2, "sharpness": 2.2}
+        return {"brightness": 1.1, "contrast": 1.2, "sharpness": 2.5, "focus_area": "auto"}
 
     def stop_ai_vis(self):
         self.is_running["phase1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
-    def retouch_high_fidelity(self, path, out_dir, p_type, plan):
+    def retouch_professional(self, path, out_dir, p_type, plan):
         filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
         try:
-            img = Image.open(path).convert("RGB")
-            img = ImageOps.autocontrast(img, cutoff=1)
-            img = ImageEnhance.Brightness(img).enhance(plan.get('brightness', 1.05))
-            img = ImageEnhance.Contrast(img).enhance(1.2)
-            s_val = plan.get('sharpness', 2.2)
-            if p_type == 'R': s_val *= 1.2
-            img = ImageEnhance.Sharpness(img).enhance(s_val)
-            img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-            final = ImageEnhance.Color(img).enhance(1.05); final.save(out_path, "JPEG", quality=98)
-        except: pass
+            # 1. Background Removal (Pure White)
+            img_pil = Image.open(path).convert("RGB")
+            if HAS_AI_TOOLS:
+                # Remove BG and force white background
+                no_bg = remove(img_pil)
+                white_bg = Image.new("RGB", no_bg.size, (255, 255, 255))
+                # Handle alpha channel if exists
+                if no_bg.mode == 'RGBA':
+                    white_bg.paste(no_bg, mask=no_bg.split()[3])
+                    img_pil = white_bg
+                else:
+                    img_pil = no_bg
+
+            # 2. Defect Cleaning (OpenCV)
+            if HAS_AI_TOOLS:
+                open_cv_img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+                # Denoise to remove small dust/grains
+                open_cv_img = cv2.fastNlMeansDenoisingColored(open_cv_img, None, 10, 10, 7, 21)
+                img_pil = Image.fromarray(cv2.cvtColor(open_cv_img, cv2.COLOR_BGR2RGB))
+
+            # 3. Enhancements (Based on Gemini Plan)
+            img_pil = ImageOps.autocontrast(img_pil, cutoff=0.5)
+            img_pil = ImageEnhance.Brightness(img_pil).enhance(plan.get('brightness', 1.1))
+            img_pil = ImageEnhance.Contrast(img_pil).enhance(plan.get('contrast', 1.2))
+            
+            s_val = plan.get('sharpness', 2.5)
+            if p_type == 'R': s_val *= 1.3 # Shank Sharpener
+            img_pil = ImageEnhance.Sharpness(img_pil).enhance(s_val)
+            
+            # 4. Final Polish & Save (Optimized File Size)
+            img_pil.save(out_path, "JPEG", quality=88, optimize=True, subsampling=0)
+        except Exception as e:
+            # Fallback
+            img_pil = Image.open(path).convert("RGB")
+            img_pil.save(out_path, "JPEG", quality=85)
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
@@ -345,7 +382,7 @@ class JewelryManagerApp:
                 im.thumbnail((1100, 1100))
                 x = 100 if i == 0 else 1300; y = (1200 - im.height) // 2
                 composite.paste(im, (x, y))
-            composite.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95)
+            composite.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=90, optimize=True)
         except: pass
 
     def run_phase_rename(self):
