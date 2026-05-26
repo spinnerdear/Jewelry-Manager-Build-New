@@ -1,8 +1,4 @@
 Pillow
 pyinstaller
 tkinterdnd2
-google-generativeai
-rembg
-opencv-python
-numpy
-onnxruntime
+google-genai

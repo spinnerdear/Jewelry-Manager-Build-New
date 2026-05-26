@@ -20,21 +20,11 @@ import threading
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 
-# Cloud AI support
 try:
-    import google.generativeai as genai
-    HAS_GEMINI = True
+    from google import genai as google_genai
+    HAS_GEMINI_IMAGE = True
 except ImportError:
-    HAS_GEMINI = False
-
-# AI Retouching libraries
-try:
-    from rembg import remove
-    import cv2
-    import numpy as np
-    HAS_AI_TOOLS = True
-except ImportError:
-    HAS_AI_TOOLS = False
+    HAS_GEMINI_IMAGE = False
 
 # Drag and Drop support
 try:
@@ -305,7 +295,7 @@ class JewelryManagerApp:
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_ai_retouch(self):
-        if not HAS_GEMINI: messagebox.showerror("Error", "Google AI libraries not found."); return
+        if not HAS_GEMINI_IMAGE: messagebox.showerror("Error", "Google AI image library not found."); return
         key = self.gemini_key.get().strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
         if not key: messagebox.showwarning("API Key Missing", "Enter Google API Key."); return
         src = self.source_dir.get()
@@ -320,11 +310,13 @@ class JewelryManagerApp:
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
-        try: genai.configure(api_key=api_key)
-        except Exception as e: self.log_threadsafe(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
+        if not HAS_GEMINI_IMAGE:
+            self.log_threadsafe("Google AI image library not found.", "error", "E006")
+            self.stop_ai_vis()
+            return
 
         self.set_progress_threadsafe(0, len(folder_paths))
-        self.log_threadsafe("AI is performing High-Fidelity Retouching...", "highlight")
+        self.log_threadsafe("AI is performing image retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
             f_n = os.path.basename(folder); self.log_threadsafe(f"Processing {f_n}...", "info")
             try:
@@ -336,12 +328,14 @@ class JewelryManagerApp:
                 limit = 2 if p_t == 'E' else 1
                 files_to_ai = all_files[:limit]
 
-                # Use Gemini for Analysis (Contextual Planning)
-                plan = self.get_ai_vision_plan(os.path.join(folder, files_to_ai[0]), p_t, api_key)
-                
                 for f_p in files_to_ai:
-                    self.retouch_professional(os.path.join(folder, f_p), folder, p_t, plan)
-                    self.log_threadsafe(f"  > AI Retouched: {f_p}", "success")
+                    file_path = os.path.join(folder, f_p)
+                    if self.retouch_with_gemini_image(file_path, folder, p_t, api_key):
+                        self.log_threadsafe(f"  > Gemini Image Retouched: {f_p}", "success")
+                    else:
+                        plan = self.get_ai_vision_plan(file_path, p_t, api_key)
+                        self.retouch_professional(file_path, folder, p_t, plan)
+                        self.log_threadsafe(f"  > Local Retouched: {f_p}", "warning")
                 
                 if p_t == 'E' and len(files_to_ai) >= 2:
                     ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
@@ -351,17 +345,49 @@ class JewelryManagerApp:
         self.log_threadsafe("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished."))
 
-    def get_ai_vision_plan(self, img_path, p_type, key):
+    def retouch_with_gemini_image(self, path, out_dir, p_type, api_key):
+        if not HAS_GEMINI_IMAGE:
+            return False
+
+        filename = os.path.basename(path)
+        name_p, ext = os.path.splitext(filename)
+        out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
-            img = Image.open(img_path); img.thumbnail((512, 512))
-            prompt = f"Expert Jewelry Retoucher: Analyze this {p_type}. Check for dust, shank blur, and hanger. Suggest Brightness (0.8-1.4), Contrast (1.0-1.5), and Sharpness (1.0-4.0). Return JSON ONLY: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5, \"focus_area\": \"shank\"}}"
-            response = model.generate_content([prompt, img])
-            match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            if match: return json.loads(match.group(0))
+            client = google_genai.Client(api_key=api_key)
+            img = Image.open(path).convert("RGB")
+            img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+
+            prompt = (
+                "Edit this jewelry product photo into a premium e-commerce studio image. "
+                "Keep the exact same jewelry design, stone count, gemstone color, metal color, proportions, and viewing angle. "
+                "Do not invent, remove, or reshape stones, prongs, engraving, shank, hooks, or any jewelry details. "
+                "Cleanly remove the background and replace it with pure white (#ffffff). "
+                "Brighten the jewelry naturally, preserve highlights, recover shadow detail, and avoid making the metal or stones darker. "
+                "Remove dust, fingerprints, gray cast, yellow cast, and small photography artifacts. "
+                "For rings, keep the shank crisp but anatomically faithful to the source. "
+                "For earrings, remove hanging fixtures only if they are not part of the product. "
+                "Return one final retouched product image only."
+            )
+
+            response = client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=[prompt, img],
+            )
+
+            for part in response.parts:
+                if getattr(part, "inline_data", None) is not None:
+                    edited = part.as_image()
+                    edited.save(out_path, quality=95, optimize=True)
+                    return True
+
+            self.log_threadsafe(f"Gemini returned no image for {filename}; using local fallback.", "warning")
+            return False
         except Exception as e:
-            self.log_threadsafe(f"AI planning fallback for {os.path.basename(img_path)}: {e}", "warning")
-        return {"brightness": 1.1, "contrast": 1.2, "sharpness": 2.5, "focus_area": "auto"}
+            self.log_threadsafe(f"Gemini image edit failed for {filename}: {e}", "warning")
+            return False
+
+    def get_ai_vision_plan(self, img_path, p_type, key):
+        return {"brightness": 1.1, "contrast": 1.08, "sharpness": 1.8, "focus_area": "auto"}
 
     def stop_ai_vis(self):
         self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 CLOUD AI RETOUCH")
@@ -369,27 +395,7 @@ class JewelryManagerApp:
     def retouch_professional(self, path, out_dir, p_type, plan):
         filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
         try:
-            # 1. Background Removal (Pure White)
             img_pil = Image.open(path).convert("RGB")
-            if HAS_AI_TOOLS:
-                # Remove BG and force white background
-                no_bg = remove(img_pil)
-                white_bg = Image.new("RGB", no_bg.size, (255, 255, 255))
-                # Handle alpha channel if exists
-                if no_bg.mode == 'RGBA':
-                    white_bg.paste(no_bg, mask=no_bg.split()[3])
-                    img_pil = white_bg
-                else:
-                    img_pil = no_bg
-
-            # 2. Defect Cleaning (OpenCV)
-            if HAS_AI_TOOLS:
-                open_cv_img = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
-                # Denoise to remove small dust/grains
-                open_cv_img = cv2.fastNlMeansDenoisingColored(open_cv_img, None, 10, 10, 7, 21)
-                img_pil = Image.fromarray(cv2.cvtColor(open_cv_img, cv2.COLOR_BGR2RGB))
-
-            # 3. Enhancements (Based on Gemini Plan)
             img_pil = ImageOps.autocontrast(img_pil, cutoff=0.5)
             img_pil = ImageEnhance.Brightness(img_pil).enhance(plan.get('brightness', 1.1))
             img_pil = ImageEnhance.Contrast(img_pil).enhance(plan.get('contrast', 1.2))
@@ -398,7 +404,6 @@ class JewelryManagerApp:
             if p_type == 'R': s_val *= 1.3 # Shank Sharpener
             img_pil = ImageEnhance.Sharpness(img_pil).enhance(s_val)
 
-            # 4. Final Polish & Save (Optimized File Size)
             img_pil.save(out_path, "JPEG", quality=88, optimize=True, subsampling=0)
         except Exception as e:
             self.log_threadsafe(f"Retouch fallback for {filename}: {e}", "warning")

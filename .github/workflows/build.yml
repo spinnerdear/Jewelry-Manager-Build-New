@@ -10,10 +10,10 @@
                python-version: '3.10'
            - name: Install dependencies
              run: |
-               pip install pyinstaller pillow google-generativeai rembg opencv-python numpy onnxruntime
+               pip install -r requirements.txt
            - name: Build EXE
              run: |
-               pyinstaller --onefile --noconsole --collect-all pymatting --collect-all rembg jewelry_manager.py
+               pyinstaller --onefile --noconsole jewelry_manager.py
            - name: Upload Artifact
              uses: actions/upload-artifact@v4
              with:

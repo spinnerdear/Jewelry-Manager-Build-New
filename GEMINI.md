@@ -4,9 +4,9 @@
 
 ## 🏗 Architectural Overview
 - **Version:** v2.0 Beta 19 (Cloud AI Edition)
-- **Primary AI Agent:** Google Gemini 1.5 Flash (API Integration)
+- **Primary AI Agent:** Gemini image editing API (`gemini-2.5-flash-image`)
 - **GUI:** Tkinter (Custom Dark Theme)
-- **Libraries:** `google-generativeai`, `rembg`, `opencv-python`, `numpy`, `onnxruntime`, `pillow`, `tkinterdnd2`
+- **Libraries:** `google-genai`, `pillow`, `tkinterdnd2`
 - **Deployment Strategy:** Unified Release (Single Commit) via GitHub Actions
 
 ## 🎯 AI Retouching Standards (Critical Checklist)

@@ -19,6 +19,53 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 Changed files:
 - `jewelry_manager.py`
 - `requirements.txt`
+- `.github/workflows/build.yml`
+- `GEMINI.md`
+- `HANDOFF.md`
+
+Summary:
+- Investigated why the built program is large even though retouching should use an AI API.
+- Root cause: the Windows build installed and bundled local AI/CV dependencies (`rembg`, `opencv-python`, `numpy`, `onnxruntime`) and used `pyinstaller --collect-all rembg`.
+- Removed the local AI background-removal stack from runtime and build dependencies.
+- Updated GitHub Actions to install from `requirements.txt` and build without collecting `rembg`.
+- Kept a lightweight Pillow-only fallback for basic exposure/sharpness if Gemini image editing fails.
+
+Validation:
+- Passed: `python3 -m py_compile jewelry_manager.py`.
+- Passed: `git diff --check`.
+- Passed: source/build scan found no remaining runtime/build references to `rembg`, `opencv-python`, `numpy`, `onnxruntime`, `pymatting`, or `--collect-all` outside this handoff note.
+
+Remaining risks:
+- GitHub Actions build artifact size should be checked after the next push.
+- If Gemini image editing is unavailable for the account/key, fallback will not remove the background; it only does light local enhancement.
+
+### 2026-05-26 - Codex
+
+Changed files:
+- `jewelry_manager.py`
+- `requirements.txt`
+- `HANDOFF.md`
+
+Summary:
+- Investigated poor Phase 1.5 output quality. Root cause: the previous flow used Gemini only for text-based parameter planning, then used local `rembg`/OpenCV/Pillow for actual image output.
+- Added a Gemini image-editing path using `gemini-2.5-flash-image` through the `google-genai` SDK.
+- Kept the existing local retouch path as fallback if Gemini image editing is unavailable, returns no image, or raises an API/package error.
+- Added `google-genai` to requirements.
+
+Validation:
+- Passed: `python3 -m py_compile jewelry_manager.py`.
+- Passed: `git diff --check`.
+- Passed: local import check for `from google import genai` after installing `google-genai`.
+
+Remaining risks:
+- Needs manual test with real jewelry photos and a valid Gemini API key.
+- Gemini image editing output may vary by account access, quota, billing, and model availability.
+
+### 2026-05-26 - Codex
+
+Changed files:
+- `jewelry_manager.py`
+- `requirements.txt`
 - `.gitignore`
 - `README.md`
 - `GEMINI.md`
