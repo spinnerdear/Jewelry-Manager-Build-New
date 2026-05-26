@@ -38,7 +38,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 14"
+        self.version = "2.0 Beta 16"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
@@ -169,7 +169,7 @@ class JewelryManagerApp:
         left = tk.Frame(main, bg=self.colors["bg"]); left.pack(side="left", fill="both", expand=True, padx=(0, 25))
         right = tk.Frame(main, bg=self.colors["bg"]); right.pack(side="right", fill="both", expand=True, padx=(25, 0))
 
-        # --- LEFT SIDE: CONFIGURATION ---
+        # LEFT SIDE
         tk.Label(left, text="SYSTEM CONFIGURATION", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_path_card(left, "PHOTO 1: MAIN DATABASE DRIVE", self.photo1_dir)
         self.add_path_card(left, "PHOTO 2: BACKUP DATABASE DRIVE", self.photo2_dir)
@@ -186,7 +186,7 @@ class JewelryManagerApp:
         self.source_entry = tk.Entry(w_f, textvariable=self.source_dir, font=("Consolas", 11), bg="#0f0f12", fg="#fff", relief="flat", highlightthickness=1, highlightbackground="#444", insertbackground="white"); self.source_entry.pack(fill="x", pady=(0, 15), ipady=10)
         self.create_styled_button(w_f, "BROWSE LOCAL FOLDER", lambda: self.browse_dir(self.source_dir, False), self.colors["accent"], "#0f0f12").pack(fill="x")
 
-        # --- RIGHT SIDE: WORKFLOW ---
+        # RIGHT SIDE
         tk.Label(right, text="PRODUCTION WORKFLOW", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_wf_step(right, "1. GROUP BY CODE", self.run_phase_1, "phase1")
         self.ai_btn = self.add_wf_step(right, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, "phase1_5", True)
@@ -268,9 +268,9 @@ class JewelryManagerApp:
         if not src or not os.path.exists(src): return
         all_folders = [os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
         if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
-        if not messagebox.askyesno("Confirm", "🚀 Start Advanced Google Cloud AI Retouching?\n(High Quality Mode)"): return
+        if not messagebox.askyesno("Confirm", "🚀 Start Selective Google Cloud AI Retouching?"): return
 
-        self.ai_btn.config(state="disabled", text="⌛ CLOUD RETOUCHING..."); self.is_running["p1_5"] = True
+        self.ai_btn.config(state="disabled", text="⌛ CLOUD PROCESSING..."); self.is_running["p1_5"] = True
         threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
 
     def gemini_agent_process(self, folder_paths, api_key):
@@ -278,78 +278,63 @@ class JewelryManagerApp:
         except Exception as e: self.log(f"API Error: {e}", "error", "E006"); self.stop_ai_vis(); return
 
         self.progress['maximum'] = len(folder_paths)
-        self.log("🚀 Google Cloud AI is analyzing & enhancing images...", "highlight")
+        self.log("🚀 Google Cloud AI is selectively retouching...", "highlight")
         for i, folder in enumerate(folder_paths):
             f_n = os.path.basename(folder); self.log(f"Analyzing {f_n}...", "info")
             try:
-                files = [os.path.join(folder, f) for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
-                if not files: continue
-                out_dir = os.path.join(folder, "ai_retouched")
-                if not os.path.exists(out_dir): os.makedirs(out_dir)
+                all_files = sorted([f for f in os.listdir(folder) if f.lower().endswith(('.jpg', '.jpeg', '.png')) and "_AI" not in f])
+                if not all_files: continue
                 p_t = f_n[0].upper()
                 
-                # Get specific retouch plan from Gemini
-                plan = self.get_ai_vision_plan(files[0], p_t, api_key)
+                # Rule: Earring 2 images, Others 1 image
+                limit = 2 if p_t == 'E' else 1
+                files_to_ai = all_files[:limit]
+                plan = self.get_ai_vision_plan(os.path.join(folder, files_to_ai[0]), p_t, api_key)
                 
-                for f_p in files:
-                    self.retouch_high_fidelity(f_p, out_dir, p_t, plan)
-                    self.log(f"  > AI Success: {os.path.basename(f_p)}", "success")
-                if p_t == 'E' and len(files) >= 2: self.merge_earring_views(files, out_dir, f_n)
+                for f_p in files_to_ai:
+                    self.retouch_high_fidelity(os.path.join(folder, f_p), folder, p_t, plan)
+                    self.log(f"  > AI Success: {f_p}", "success")
+                
+                if p_t == 'E' and len(files_to_ai) >= 2:
+                    # Merge only the newly created AI versions
+                    ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
+                    self.merge_earring_views(ai_paths, folder, f_n)
             except Exception as e: self.log(f"Error {f_n}: {e}", "error")
             self.progress['value'] = i + 1; self.root.update_idletasks()
-        self.log("All tasks complete.", "highlight"); self.stop_ai_vis()
+        self.log("Selective AI tasks complete.", "highlight"); self.stop_ai_vis()
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
 
     def get_ai_vision_plan(self, img_path, p_type, key):
-        """Asks Gemini to analyze the image and provide a retouching strategy."""
         try:
             model = genai.GenerativeModel('gemini-1.5-flash')
-            img = Image.open(img_path)
-            img.thumbnail((512, 512))
-            prompt = f"Analyze this jewelry image (Type: {p_type}). Return JSON ONLY: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5, \"gem_sparkle\": true}}"
+            img = Image.open(img_path); img.thumbnail((512, 512))
+            prompt = f"Analyze jewelry {p_type}. Return JSON: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5}}"
             response = model.generate_content([prompt, img])
-            res_text = response.text
-            match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            match = re.search(r'\{.*\}', response.text, re.DOTALL)
             if match: return json.loads(match.group(0))
         except: pass
-        return {"brightness": 1.05, "contrast": 1.2, "sharpness": 2.2, "gem_sparkle": True}
+        return {"brightness": 1.05, "contrast": 1.2, "sharpness": 2.2}
 
     def stop_ai_vis(self):
         self.is_running["p1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
     def retouch_high_fidelity(self, path, out_dir, p_type, plan):
-        """Advanced Image Enhancement for Beta 12."""
-        filename = os.path.basename(path); out_path = os.path.join(out_dir, filename)
+        filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
         try:
             img = Image.open(path).convert("RGB")
-            # 1. Advanced Polish using AI Plan
             img = ImageOps.autocontrast(img, cutoff=1)
             img = ImageEnhance.Brightness(img).enhance(plan.get('brightness', 1.05))
             img = ImageEnhance.Contrast(img).enhance(plan.get('contrast', 1.2))
-            
-            # 2. Shank and Detail Sharpening
-            sharp_val = plan.get('sharpness', 2.2)
-            if p_type == 'R': sharp_val *= 1.2 # Extra boost for rings
-            img = ImageEnhance.Sharpness(img).enhance(sharp_val)
-            
-            # 3. Clean Background (Pure White Trick)
-            # In Pure Cloud mode, we emphasize extreme highlights to white
+            s_val = plan.get('sharpness', 2.2)
+            if p_type == 'R': s_val *= 1.2
+            img = ImageEnhance.Sharpness(img).enhance(s_val)
             img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-            
-            # 4. Final Color Preservation
-            final = ImageEnhance.Color(img).enhance(1.05)
-            
-            # Save with high quality
-            final.save(out_path, "JPEG", quality=98)
-        except Exception as e:
-            self.log(f"Retouch Error {filename}: {e}", "error")
+            final = ImageEnhance.Color(img).enhance(1.05); final.save(out_path, "JPEG", quality=98)
+        except: pass
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
-            imgs = []
-            for f in files[:2]:
-                ai_p = os.path.join(out_dir, os.path.basename(f))
-                imgs.append(Image.open(ai_p if os.path.exists(ai_p) else f))
+            imgs = [Image.open(f) for f in files[:2]]
             composite = Image.new('RGB', (2400, 1200), (255, 255, 255))
             for i, im in enumerate(imgs):
                 im.thumbnail((1100, 1100))
@@ -362,63 +347,35 @@ class JewelryManagerApp:
         src = self.source_dir.get()
         if not src: return
         folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
-        
         def task():
             self.is_running["p2"] = True
             for i, folder_name in enumerate(folders):
                 base_path = os.path.join(src, folder_name)
-                ai_path = os.path.join(base_path, "ai_retouched")
-                # Prefer AI retouched files if they exist
-                work_dir = ai_path if os.path.exists(ai_path) and os.listdir(ai_path) else base_path
-                files = sorted([f for f in os.listdir(work_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-                
-                if files:
-                    # Visual selection must happen on the main thread
-                    self.root.after(0, lambda w=work_dir, f=files, n=folder_name, b=base_path: self.process_rename_visual(w, f, n, b))
-                
+                files = sorted([f for f in os.listdir(base_path) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+                if files: self.root.after(0, lambda f=files, n=folder_name, b=base_path: self.process_rename_visual(b, f, n, b))
                 self.progress['value'] = (i+1)/len(folders)*100
-                self.root.update_idletasks()
             self.is_running["p2"] = False
         threading.Thread(target=task, daemon=True).start()
 
     def process_rename_visual(self, work_dir, files, folder_name, base_path):
-        """QC FIX: Clears old files and renames correctly using a temp swap."""
         main_file = self.choose_main_file_visual(work_dir, files, folder_name)
         if not main_file: return
-        
-        # 1. Create a temporary folder to isolate the files we want to keep
-        temp_dir = os.path.join(base_path, "_rename_temp")
-        if not os.path.exists(temp_dir): os.makedirs(temp_dir)
-        
-        # 2. Move targeted files to the temporary folder
-        for f in files:
-            shutil.move(os.path.join(work_dir, f), os.path.join(temp_dir, f))
-            
-        # 3. CRITICAL: Clean the main folder of ALL images to avoid having old versions left behind
+        temp_dir = os.path.join(base_path, "_rename_temp"); os.makedirs(temp_dir, exist_ok=True)
+        for f in files: shutil.move(os.path.join(base_path, f), os.path.join(temp_dir, f))
         for f in os.listdir(base_path):
-            if f.lower().endswith(('.jpg', '.jpeg', '.png')):
-                try: os.remove(os.path.join(base_path, f))
-                except: pass
-
-        # 4. Copy files back with the new naming convention
+            if f.lower().endswith(('.jpg', '.jpeg', '.png')): os.remove(os.path.join(base_path, f))
         counter = 2
         for f in files:
             ext = os.path.splitext(f)[1].lower()
-            if f == main_file: final_name = f"{folder_name}{ext}"
-            else:
-                final_name = f"{folder_name}-{counter}{ext}"
-                counter += 1
-            shutil.copy2(os.path.join(temp_dir, f), os.path.join(base_path, final_name))
-            
-        # 5. Cleanup the temporary folder
-        try: shutil.rmtree(temp_dir)
-        except: pass
-        self.log(f"Renamed: {folder_name} (Clean Swap)", "success")
+            final = f"{folder_name}{ext}" if f == main_file else f"{folder_name}-{counter}{ext}"
+            if f != main_file: counter += 1
+            shutil.copy2(os.path.join(temp_dir, f), os.path.join(base_path, final))
+        shutil.rmtree(temp_dir); self.log(f"Renamed: {folder_name}", "success")
 
     def choose_main_file_visual(self, folder_path, files, folder_name):
         if len(files) <= 1: return files[0]
         win = tk.Toplevel(self.root); win.title(f"Select: {folder_name}"); win.geometry("1000x750"); win.grab_set(); res = tk.StringVar()
-        tk.Label(win, text=f"SELECT PRIMARY PHOTO", bg="#121212", fg=self.colors["accent"], font=("Segoe UI", 11, "bold")).pack(pady=10)
+        tk.Label(win, text=f"PICK PRIMARY PHOTO", bg="#121212", fg=self.colors["accent"], font=("Segoe UI", 11, "bold")).pack(pady=10)
         can = tk.Canvas(win, bg="#121212", highlightthickness=0); can.pack(side="left", fill="both", expand=True)
         gal = tk.Frame(can, bg="#121212"); can.create_window((0,0), window=gal, anchor="nw")
         photo_refs = []
@@ -437,20 +394,25 @@ class JewelryManagerApp:
     def run_phase_backup(self):
         src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
         if not all([src, p1, p2]): messagebox.showwarning("Warning", "Check config."); return
-        def backup_task():
+        def task():
             self.is_running["p3"] = True; s_c = 0
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             for i, f_n in enumerate(folders):
-                f_p = os.path.join(src, f_n); main_f = f"{f_n}.jpg"
-                if not os.path.exists(os.path.join(f_p, main_f)): continue
+                f_p = os.path.join(src, f_n)
+                files_to_copy = [f for f in os.listdir(f_p) if f.startswith(f_n) and f.lower().endswith(('.jpg', '.png', '.jpeg'))]
+                if not files_to_copy: continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")
                 m = re.search(r'(\d+)', f_n); r_v = int(m.group(1)) if m else 0
                 t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {self.get_range(r_v)}")
-                t1 = os.path.join(p1, t_r)
-                if os.path.exists(t1): shutil.copy2(os.path.join(f_p, main_f), os.path.join(t1, main_f)); s_c += 1
+                for dest_base in [p1, p2]:
+                    t_dir = os.path.join(dest_base, t_r)
+                    if os.path.exists(t_dir):
+                        for f in files_to_copy:
+                            try: shutil.copy2(os.path.join(f_p, f), os.path.join(t_dir, f)); s_c += 1
+                            except: pass
                 self.progress['value'] = (i+1)/len(folders)*100
             self.log(f"Phase 3: Collected {s_c} files.", "success"); self.is_running["p3"] = False
-        threading.Thread(target=backup_task, daemon=True).start()
+        threading.Thread(target=task, daemon=True).start()
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
@@ -458,7 +420,7 @@ class JewelryManagerApp:
         def task():
             self.is_running["p4"] = True
             now = datetime.now(); path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
-            if not os.path.exists(path): os.makedirs(path)
+            os.makedirs(path, exist_ok=True)
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
             for f_n in folders:
                 try: shutil.move(os.path.join(src, f_n), os.path.join(path, f_n))
