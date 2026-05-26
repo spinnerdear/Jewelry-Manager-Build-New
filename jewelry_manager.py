@@ -38,7 +38,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 12"
+        self.version = "2.0 Beta 14"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
@@ -361,30 +361,59 @@ class JewelryManagerApp:
     def run_phase_rename(self):
         src = self.source_dir.get()
         if not src: return
-        folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
+        folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
+        
         def task():
             self.is_running["p2"] = True
             for i, folder_name in enumerate(folders):
                 base_path = os.path.join(src, folder_name)
                 ai_path = os.path.join(base_path, "ai_retouched")
-                target_work_dir = ai_path if os.path.exists(ai_path) and os.listdir(ai_path) else base_path
-                files = sorted([f for f in os.listdir(target_work_dir) if os.path.isfile(os.path.join(target_work_dir, f)) and f.lower().endswith(('.jpg', '.jpeg', '.png'))])
-                if not files: continue
-                self.root.after(0, lambda w=target_work_dir, f=files, n=folder_name, b=base_path: self.process_rename_visual(w, f, n, b))
+                # Prefer AI retouched files if they exist
+                work_dir = ai_path if os.path.exists(ai_path) and os.listdir(ai_path) else base_path
+                files = sorted([f for f in os.listdir(work_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+                
+                if files:
+                    # Visual selection must happen on the main thread
+                    self.root.after(0, lambda w=work_dir, f=files, n=folder_name, b=base_path: self.process_rename_visual(w, f, n, b))
+                
                 self.progress['value'] = (i+1)/len(folders)*100
+                self.root.update_idletasks()
             self.is_running["p2"] = False
         threading.Thread(target=task, daemon=True).start()
 
-    def process_rename_visual(self, target_work_dir, files, folder_name, base_path):
-        main_file = self.choose_main_file_visual(target_work_dir, files, folder_name)
+    def process_rename_visual(self, work_dir, files, folder_name, base_path):
+        """QC FIX: Clears old files and renames correctly using a temp swap."""
+        main_file = self.choose_main_file_visual(work_dir, files, folder_name)
         if not main_file: return
+        
+        # 1. Create a temporary folder to isolate the files we want to keep
+        temp_dir = os.path.join(base_path, "_rename_temp")
+        if not os.path.exists(temp_dir): os.makedirs(temp_dir)
+        
+        # 2. Move targeted files to the temporary folder
         for f in files:
-            src_f = os.path.join(target_work_dir, f); ext = os.path.splitext(f)[1]
-            if f == main_file: final = f"{folder_name}{ext}"
-            else: final = f"{folder_name}-{files.index(f)+2}{ext}"
-            final_path = os.path.join(base_path, final)
-            if os.path.exists(final_path): os.remove(final_path)
-            shutil.copy2(src_f, final_path)
+            shutil.move(os.path.join(work_dir, f), os.path.join(temp_dir, f))
+            
+        # 3. CRITICAL: Clean the main folder of ALL images to avoid having old versions left behind
+        for f in os.listdir(base_path):
+            if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                try: os.remove(os.path.join(base_path, f))
+                except: pass
+
+        # 4. Copy files back with the new naming convention
+        counter = 2
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if f == main_file: final_name = f"{folder_name}{ext}"
+            else:
+                final_name = f"{folder_name}-{counter}{ext}"
+                counter += 1
+            shutil.copy2(os.path.join(temp_dir, f), os.path.join(base_path, final_name))
+            
+        # 5. Cleanup the temporary folder
+        try: shutil.rmtree(temp_dir)
+        except: pass
+        self.log(f"Renamed: {folder_name} (Clean Swap)", "success")
 
     def choose_main_file_visual(self, folder_path, files, folder_name):
         if len(files) <= 1: return files[0]
