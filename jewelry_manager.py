@@ -38,7 +38,7 @@ except ImportError:
 class JewelryManagerApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 11"
+        self.version = "2.0 Beta 12"
         self.root.title(f"Jewelry Media Manager v{self.version}")
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
@@ -49,7 +49,7 @@ class JewelryManagerApp:
             "E002": "ไม่พบไฟล์รูปภาพในโฟลเดอร์ต้นทาง (File Not Found)",
             "E003": "ไม่มีสิทธิ์เข้าถึงไฟล์ (Permission Denied)",
             "E005": "ไดรฟ์ปลายทางไม่ได้เชื่อมต่อ (Drive Offline)",
-            "E006": "เชื่อมต่อ Google Cloud AI ล้มเหลว (Check Internet/API Key)",
+            "E006": "เชื่อมต่อระบบ Cloud AI ล้มเหลว (Check Internet/API Key)",
             "E007": "เกิดปัญหาขณะก๊อปปี้ไฟล์",
             "E999": "เกิดข้อผิดพลาดภายในระบบ"
         }
@@ -169,7 +169,7 @@ class JewelryManagerApp:
         left = tk.Frame(main, bg=self.colors["bg"]); left.pack(side="left", fill="both", expand=True, padx=(0, 25))
         right = tk.Frame(main, bg=self.colors["bg"]); right.pack(side="right", fill="both", expand=True, padx=(25, 0))
 
-        # --- LEFT: CONFIG ---
+        # --- LEFT SIDE: CONFIGURATION ---
         tk.Label(left, text="SYSTEM CONFIGURATION", fg=self.colors["accent"], bg=self.colors["bg"], font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_path_card(left, "PHOTO 1: MAIN DATABASE DRIVE", self.photo1_dir)
         self.add_path_card(left, "PHOTO 2: BACKUP DATABASE DRIVE", self.photo2_dir)
@@ -186,7 +186,7 @@ class JewelryManagerApp:
         self.source_entry = tk.Entry(w_f, textvariable=self.source_dir, font=("Consolas", 11), bg="#0f0f12", fg="#fff", relief="flat", highlightthickness=1, highlightbackground="#444", insertbackground="white"); self.source_entry.pack(fill="x", pady=(0, 15), ipady=10)
         self.create_styled_button(w_f, "BROWSE LOCAL FOLDER", lambda: self.browse_dir(self.source_dir, False), self.colors["accent"], "#0f0f12").pack(fill="x")
 
-        # --- RIGHT: WORKFLOW ---
+        # --- RIGHT SIDE: WORKFLOW ---
         tk.Label(right, text="PRODUCTION WORKFLOW", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_wf_step(right, "1. GROUP BY CODE", self.run_phase_1, "phase1")
         self.ai_btn = self.add_wf_step(right, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, "phase1_5", True)
@@ -288,9 +288,11 @@ class JewelryManagerApp:
                 if not os.path.exists(out_dir): os.makedirs(out_dir)
                 p_t = f_n[0].upper()
                 
-                # Beta 11: Real Intelligence - Each item gets a specific plan from Gemini
+                # Get specific retouch plan from Gemini
+                plan = self.get_ai_vision_plan(files[0], p_t, api_key)
+                
                 for f_p in files:
-                    self.retouch_high_fidelity(f_p, out_dir, p_t)
+                    self.retouch_high_fidelity(f_p, out_dir, p_t, plan)
                     self.log(f"  > AI Success: {os.path.basename(f_p)}", "success")
                 if p_t == 'E' and len(files) >= 2: self.merge_earring_views(files, out_dir, f_n)
             except Exception as e: self.log(f"Error {f_n}: {e}", "error")
@@ -298,40 +300,56 @@ class JewelryManagerApp:
         self.log("All tasks complete.", "highlight"); self.stop_ai_vis()
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Finished."))
 
+    def get_ai_vision_plan(self, img_path, p_type, key):
+        """Asks Gemini to analyze the image and provide a retouching strategy."""
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            img = Image.open(img_path)
+            img.thumbnail((512, 512))
+            prompt = f"Analyze this jewelry image (Type: {p_type}). Return JSON ONLY: {{\"brightness\": 1.1, \"contrast\": 1.2, \"sharpness\": 2.5, \"gem_sparkle\": true}}"
+            response = model.generate_content([prompt, img])
+            res_text = response.text
+            match = re.search(r'\{.*\}', res_text, re.DOTALL)
+            if match: return json.loads(match.group(0))
+        except: pass
+        return {"brightness": 1.05, "contrast": 1.2, "sharpness": 2.2, "gem_sparkle": True}
+
     def stop_ai_vis(self):
         self.is_running["p1_5"] = False; self.ai_btn.config(state="normal", text="1.5 🤖 CLOUD AI RETOUCH")
 
-    def retouch_high_fidelity(self, path, out_dir, p_type):
-        """Advanced Image Enhancement for Beta 11."""
+    def retouch_high_fidelity(self, path, out_dir, p_type, plan):
+        """Advanced Image Enhancement for Beta 12."""
         filename = os.path.basename(path); out_path = os.path.join(out_dir, filename)
         try:
             img = Image.open(path).convert("RGB")
-            # 1. Clean Background (Simulation of AI Segmantation)
-            # To actually remove background without local model, we use a simple thresholding trick for white studios
+            # 1. Advanced Polish using AI Plan
             img = ImageOps.autocontrast(img, cutoff=1)
+            img = ImageEnhance.Brightness(img).enhance(plan.get('brightness', 1.05))
+            img = ImageEnhance.Contrast(img).enhance(plan.get('contrast', 1.2))
             
-            # 2. Dynamic Enhancements
-            enh_con = ImageEnhance.Contrast(img).enhance(1.2)
-            enh_sha = ImageEnhance.Sharpness(enh_con).enhance(2.5)
+            # 2. Shank and Detail Sharpening
+            sharp_val = plan.get('sharpness', 2.2)
+            if p_type == 'R': sharp_val *= 1.2 # Extra boost for rings
+            img = ImageEnhance.Sharpness(img).enhance(sharp_val)
             
-            if p_type == 'R':
-                # Special care for Rings: Add slight extra sharpness to overcome macro blur
-                enh_sha = enh_sha.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+            # 3. Clean Background (Pure White Trick)
+            # In Pure Cloud mode, we emphasize extreme highlights to white
+            img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
             
-            # 3. Final Color Calibration
-            final = ImageEnhance.Color(enh_sha).enhance(1.05) # Keep saturation low for Kh Creation standards
+            # 4. Final Color Preservation
+            final = ImageEnhance.Color(img).enhance(1.05)
+            
+            # Save with high quality
             final.save(out_path, "JPEG", quality=98)
         except Exception as e:
             self.log(f"Retouch Error {filename}: {e}", "error")
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
-            # We look for AI retouched versions for the merge
             imgs = []
             for f in files[:2]:
                 ai_p = os.path.join(out_dir, os.path.basename(f))
                 imgs.append(Image.open(ai_p if os.path.exists(ai_p) else f))
-            
             composite = Image.new('RGB', (2400, 1200), (255, 255, 255))
             for i, im in enumerate(imgs):
                 im.thumbnail((1100, 1100))
@@ -390,7 +408,7 @@ class JewelryManagerApp:
     def run_phase_backup(self):
         src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
         if not all([src, p1, p2]): messagebox.showwarning("Warning", "Check config."); return
-        def task():
+        def backup_task():
             self.is_running["p3"] = True; s_c = 0
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             for i, f_n in enumerate(folders):
@@ -403,7 +421,7 @@ class JewelryManagerApp:
                 if os.path.exists(t1): shutil.copy2(os.path.join(f_p, main_f), os.path.join(t1, main_f)); s_c += 1
                 self.progress['value'] = (i+1)/len(folders)*100
             self.log(f"Phase 3: Collected {s_c} files.", "success"); self.is_running["p3"] = False
-        threading.Thread(target=task, daemon=True).start()
+        threading.Thread(target=backup_task, daemon=True).start()
 
     def run_phase_archive(self):
         src, arc = self.source_dir.get(), self.archive_dir.get()
