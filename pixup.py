@@ -165,9 +165,14 @@ class PixUpApp:
             char = self.anim_chars[self.anim_idx]
             self.anim_idx = (self.anim_idx + 1) % len(self.anim_chars)
             for k, v in self.is_running.items():
-                if v: self.process_states[k].set(char)
+                if v: 
+                    self.process_states[k].set(char)
+                    # If any of the AI sub-phases are running, update the combined state
+                    if k in ["phase1_5", "phase1_6", "phase1_7"]:
+                        self.ai_combined_state.set(char)
         else:
             for v in self.process_states.values(): v.set("")
+            self.ai_combined_state.set("")
         self.root.after(100, self.start_animation_loop)
 
     def setup_dnd(self):
@@ -218,19 +223,20 @@ class PixUpApp:
         tk.Label(right, text="PRODUCTION WORKFLOW", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_wf_step(right, "1. GROUP BY CODE", self.run_phase_1, "phase1")
         
-        # Combined AI Row
-        ai_row = tk.Frame(right, bg=self.colors["bg"]); ai_row.pack(fill="x", pady=5)
-        self.ai_btn = self.create_styled_button(ai_row, "1.5 🤖 AI", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
+        # Combined AI Row (1.5, 1.6, 1.7)
+        ai_f = tk.Frame(right, bg=self.colors["bg"]); ai_f.pack(fill="x", pady=5)
+        ai_btns_container = tk.Frame(ai_f, bg=self.colors["bg"]); ai_btns_container.pack(side="left", fill="x", expand=True)
+        
+        self.ai_btn = self.create_styled_button(ai_btns_container, "1.5 🤖 AI", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
         self.ai_btn.pack(side="left", fill="x", expand=True, padx=(0, 2))
-        self.merge_btn = self.create_styled_button(ai_row, "1.6 🔗 MERGE", self.run_phase_interactive_merge, "#a362ff", "#fff")
+        self.merge_btn = self.create_styled_button(ai_btns_container, "1.6 🔗 MERGE", self.run_phase_interactive_merge, "#a362ff", "#fff")
         self.merge_btn.pack(side="left", fill="x", expand=True, padx=2)
-        self.crop_btn = self.create_styled_button(ai_row, "1.7 ✂️ CROP", self.run_phase_interactive_crop, "#ff9f43", "#000")
+        self.crop_btn = self.create_styled_button(ai_btns_container, "1.7 ✂️ CROP", self.run_phase_interactive_crop, "#ff9f43", "#000")
         self.crop_btn.pack(side="left", fill="x", expand=True, padx=(2, 0))
         
-        # Add labels for progress icons (separate from buttons in this row)
-        ai_p_f = tk.Frame(right, bg=self.colors["bg"]); ai_p_f.pack(fill="x")
-        for k in ["phase1_5", "phase1_6", "phase1_7"]:
-            tk.Label(ai_p_f, textvariable=self.process_states[k], fg=self.colors["accent"], bg=self.colors["bg"], font=("Consolas", 10, "bold")).pack(side="left", expand=True)
+        # Shared progress label for AI tools to align with other rows
+        self.ai_combined_state = tk.StringVar(value="")
+        tk.Label(ai_f, textvariable=self.ai_combined_state, fg=self.colors["accent"], bg=self.colors["bg"], font=("Consolas", 18, "bold"), width=2).pack(side="right", padx=10)
 
         self.add_wf_step(right, "2. RENAME & SELECT PRIMARY", self.run_phase_rename, "phase2")
         self.add_wf_step(right, "3. COLLECT TO DATABASE", self.run_phase_backup, "phase3")
@@ -399,15 +405,23 @@ class PixUpApp:
         return tasks if confirmed.get() else None
 
     def gemini_agent_process(self, api_key):
-        self.set_progress_threadsafe(0, len(self.ai_tasks))
-        self.log_threadsafe("AI is performing image retouching...", "highlight")
+        # Calculate total files across all selected tasks
+        total_files = sum(len(info["files"]) for info in self.ai_tasks.values())
+        processed_files = 0
         
-        for i, (folder_path, info) in enumerate(self.ai_tasks.items()):
-            f_n = os.path.basename(folder_path); self.log_threadsafe(f"Processing {f_n}...", "info")
+        self.set_progress_threadsafe(0, total_files)
+        self.log_threadsafe(f"AI is performing image retouching on {total_files} files...", "highlight")
+        
+        for folder_path, info in self.ai_tasks.items():
+            f_n = os.path.basename(folder_path)
             try:
                 for f_p in info["files"]:
+                    processed_files += 1
                     file_path = os.path.join(folder_path, f_p)
+                    self.log_threadsafe(f"[{processed_files}/{total_files}] Processing: {f_p} in {f_n}...", "info")
+                    
                     success, err_msg, is_critical = self.retouch_with_gemini_image(file_path, folder_path, "X", api_key)
+                    
                     if success:
                         self.log_threadsafe(f"  > Gemini Image Retouched: {f_p}", "success")
                     else:
@@ -416,11 +430,13 @@ class PixUpApp:
                             self.log_threadsafe("Critical AI error occurred. Stopping process.", "error")
                             self.root.after(0, lambda m=err_msg: messagebox.showerror("AI Critical Error", f"กระบวนการหยุดทำงานเนื่องจากข้อผิดพลาดร้ายแรง:\n\n{m}"))
                             self.stop_ai_vis(); return
-            except Exception as e: self.log_threadsafe(f"Error {f_n}: {e}", "error")
-            self.set_progress_threadsafe(i + 1)
+                    
+                    self.set_progress_threadsafe(processed_files)
+            except Exception as e: 
+                self.log_threadsafe(f"Error in folder {f_n}: {e}", "error")
             
         self.log_threadsafe("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
-        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished. Go to Step 1.6 to Merge Earrings."))
+        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished. Go to Step 1.6 to Merge Earrings or 1.7 to Crop."))
 
     def run_phase_interactive_merge(self):
         earring_folders = [k for k, v in self.ai_tasks.items() if v.get("is_earring", False)]
@@ -632,7 +648,10 @@ class PixUpApp:
         name_p, ext = os.path.splitext(filename)
         out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
         try:
+            self.log_threadsafe(f"    • Connecting to Google Cloud AI...", "info")
             client = google_genai.Client(api_key=api_key)
+            
+            self.log_threadsafe(f"    • Preparing & Uploading image...", "info")
             img = Image.open(path).convert("RGB")
             img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
 
@@ -648,11 +667,13 @@ class PixUpApp:
                 "Return one final retouched product image only."
             )
 
+            self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
             response = client.models.generate_content(
                 model="gemini-2.5-flash-image",
                 contents=[prompt, img],
             )
 
+            self.log_threadsafe(f"    • Receiving and saving image...", "info")
             for part in response.parts:
                 if getattr(part, "inline_data", None) is not None:
                     edited = part.as_image()
