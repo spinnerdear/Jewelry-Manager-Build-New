@@ -36,7 +36,7 @@ except ImportError:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 1"
+        self.version = "2.1 Beta 2"
         self.root.title(f"PixUp v{self.version}")
 
         self.root.geometry("1200x950")
@@ -325,19 +325,31 @@ class PixUpApp:
             messagebox.showerror("Error", self.error_codes["E001"])
             return
         
+        self.log("Phase 1.5: Scanning folders for AI Retouch...", "info")
         folders = sorted([os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"])
-        if not folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
+        if not folders: 
+            self.log("Phase 1.5: No folders found. Please run Phase 1 first.", "warning")
+            messagebox.showinfo("Info", "Run Phase 1 first.")
+            return
 
         # Step 1: Visual Selection
+        self.log("Phase 1.5: Opening Visual Selector...", "info")
         self.ai_tasks = self.open_visual_ai_selector(folders)
-        if not self.ai_tasks: return # Cancelled or nothing selected
+        if not self.ai_tasks: 
+            self.log("Phase 1.5: Selection cancelled by user.", "warning")
+            return 
 
         # Step 2: Processing
         key = self.gemini_key.get().strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
-        if not key: messagebox.showwarning("API Key Missing", "Enter Google API Key."); return
+        if not key: 
+            self.log("Phase 1.5: API Key is missing.", "error")
+            messagebox.showwarning("API Key Missing", "Enter Google API Key.")
+            return
         
-        self.set_ai_button("disabled", "⌛ CLOUD PROCESSING..."); self.set_running("phase1_5", True)
-        threading.Thread(target=self.gemini_agent_process, args=(api_key), daemon=True).start()
+        self.log(f"Phase 1.5: Starting Cloud AI for {len(self.ai_tasks)} items...", "highlight")
+        self.set_ai_button("disabled", "⌛ PROCESSING...")
+        self.set_running("phase1_5", True)
+        threading.Thread(target=self.gemini_agent_process, args=(key,), daemon=True).start()
 
     def open_visual_ai_selector(self, folder_paths):
         win = tk.Toplevel(self.root); win.title("AI PHOTO SELECTOR"); win.geometry("1100x850"); win.grab_set()
@@ -439,12 +451,15 @@ class PixUpApp:
         self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished. Go to Step 1.6 to Merge Earrings or 1.7 to Crop."))
 
     def run_phase_interactive_merge(self):
+        self.log("Phase 1.6: Filtering earring folders for merge...", "info")
         earring_folders = [k for k, v in self.ai_tasks.items() if v.get("is_earring", False)]
         if not earring_folders:
+            self.log("Phase 1.6: No earring tasks found. (Select 2 photos in Phase 1.5 first)", "warning")
             messagebox.showinfo("Info", "No earring tasks found. Ensure you selected 2 photos in Phase 1.5.")
             return
 
         def task():
+            self.log(f"Phase 1.6: Starting Interactive Merge for {len(earring_folders)} folders...", "highlight")
             self.set_running("phase1_6", True)
             for i, f_path in enumerate(earring_folders):
                 f_n = os.path.basename(f_path)
@@ -542,6 +557,7 @@ class PixUpApp:
         refresh_canvas()
 
     def run_phase_interactive_crop(self):
+        self.log("Phase 1.7: Filtering AI-retouched files for cropping...", "info")
         # Identify non-earring files that have been AI retouched
         crop_tasks = []
         for folder_path, info in self.ai_tasks.items():
@@ -553,10 +569,12 @@ class PixUpApp:
                         crop_tasks.append((ai_p, folder_path, f"{name_p}_AI{ext}"))
         
         if not crop_tasks:
+            self.log("Phase 1.7: No AI-retouched photos found for cropping.", "warning")
             messagebox.showinfo("Info", "No AI-retouched photos found for cropping (excluding earrings).")
             return
 
         def task():
+            self.log(f"Phase 1.7: Starting Interactive Crop for {len(crop_tasks)} files...", "highlight")
             self.set_running("phase1_7", True)
             for i, (ai_path, out_dir, filename) in enumerate(crop_tasks):
                 self.log_threadsafe(f"Cropping: {filename} ({i+1}/{len(crop_tasks)})", "info")
@@ -703,7 +721,7 @@ class PixUpApp:
             return False, friendly_err, is_critical
 
     def stop_ai_vis(self):
-        self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 CLOUD AI RETOUCH")
+        self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 AI")
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
