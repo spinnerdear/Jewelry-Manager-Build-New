@@ -35,10 +35,27 @@ except ImportError:
     HAS_DND = False
 
 class PixUpApp:
+    def extract_code(self, text):
+        match = re.search(r"```python\n(.*?)\n```", text, re.DOTALL)
+        if not match:
+            # Try without language tag
+            match = re.search(r"```\n(.*?)\n```", text, re.DOTALL)
+        return match.group(1).strip() if match else None
+
+    def execute_local_retouch_code(self, code, img, output_path):
+        try:
+            local_scope = {"img": img, "output_path": output_path, "Image": Image, "ImageEnhance": ImageEnhance}
+            exec(code, local_scope)
+            return True
+        except Exception as e:
+            self.log_threadsafe(f"Local execution error: {e}", "error")
+            return False
+
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 4"
+        self.version = "2.1 Beta 11"
         self.root.title(f"PixUp v{self.version}")
+
 
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
