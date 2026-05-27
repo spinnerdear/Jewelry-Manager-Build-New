@@ -700,9 +700,10 @@ class PixUpApp:
 
                 self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
                 response = client.models.generate_content(
-                    model="gemini-1.5-flash",
+                    model="imagen-3.0-generate-002",
                     contents=[prompt, img],
                 )
+
 
                 # DEBUG: Print full response to log area
                 self.log_threadsafe(f"    DEBUG: API Response -> {response}", "info")
