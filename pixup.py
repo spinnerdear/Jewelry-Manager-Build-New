@@ -683,13 +683,14 @@ class PixUpApp:
                 "For rings, keep the shank crisp but anatomically faithful to the source. "
                 "For earrings, remove hanging fixtures only if they are not part of the product. "
                 "Return one final retouched product image only."
-            )
+            self.version = "2.1 Beta 3"
+            ...
+                self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=[prompt, img],
+                )
 
-            self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
-            response = client.models.generate_content(
-                model="gemini-2.5-flash-image",
-                contents=[prompt, img],
-            )
 
             self.log_threadsafe(f"    • Receiving and saving image...", "info")
             for part in response.parts:
