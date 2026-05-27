@@ -724,8 +724,13 @@ class PixUpApp:
                 for part in response.parts:
                     if getattr(part, "inline_data", None) is not None:
                         edited = part.as_image()
-                        # Optimization: Save with 85 quality to save disk and keep high fidelity
-                        edited.save(out_path, "JPEG", quality=85, optimize=True)
+                        self.version = "2.1 Beta 10"
+
+                        # Optimization: Save with quality only if JPEG
+                        if out_path.lower().endswith(('.jpg', '.jpeg')):
+                            edited.save(out_path, "JPEG", quality=85, optimize=True)
+                        else:
+                            edited.save(out_path, optimize=True)
                         return True, "", False
 
                 return False, "Gemini returned no image data", False
