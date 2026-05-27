@@ -1,21 +1,43 @@
-     name: Build Windows EXE
-     on: [push, workflow_dispatch]
-     jobs:
-       build:
-         runs-on: windows-latest
-         steps:
-           - uses: actions/checkout@v3
-           - uses: actions/setup-python@v4
-             with:
-               python-version: '3.10'
-           - name: Install dependencies
-             run: |
-               pip install -r requirements.txt
-           - name: Build EXE
-             run: |
-               pyinstaller --onefile --noconsole jewelry_manager.py
-           - name: Upload Artifact
-             uses: actions/upload-artifact@v4
-             with:
-               name: JewelryManager-EXE
-               path: dist/jewelry_manager.exe
+name: Build PixUp Windows EXE
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Extract Version from Code
+        id: get_version
+        shell: bash
+        run: |
+          # ดึงเลขเวอร์ชันจากบรรทัด self.version = "..."
+          VERSION=$(grep -oP 'self\.version\s*=\s*"\K[^"]+' pixup.py)
+          # เปลี่ยนช่องว่างเป็นขีดล่างเพื่อให้ชื่อไฟล์ไม่มีปัญหา (e.g., "2.1 Beta 1" -> "2.1_Beta_1")
+          CLEAN_VERSION=$(echo $VERSION | sed 's/ /_/g')
+          echo "VERSION=$CLEAN_VERSION" >> $GITHUB_OUTPUT
+          echo "Found version: $CLEAN_VERSION"
+
+      - name: Build EXE with PyInstaller
+        run: |
+          # สร้างไฟล์ EXE โดยใช้ชื่อ PixUp_v[เลขเวอร์ชัน]
+          pyinstaller --onefile --noconsole --name "PixUp_v${{ steps.get_version.outputs.VERSION }}" pixup.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PixUp_v${{ steps.get_version.outputs.VERSION }}-EXE
+          path: dist/PixUp_v${{ steps.get_version.outputs.VERSION }}.exe
