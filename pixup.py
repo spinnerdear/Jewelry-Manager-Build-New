@@ -53,7 +53,7 @@ class PixUpApp:
 
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 11"
+        self.version = "2.1 Beta 12"
         self.root.title(f"PixUp v{self.version}")
 
 
