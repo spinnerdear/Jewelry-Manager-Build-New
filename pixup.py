@@ -36,7 +36,7 @@ except ImportError:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 2"
+        self.version = "2.1 Beta 3"
         self.root.title(f"PixUp v{self.version}")
 
         self.root.geometry("1200x950")
@@ -683,13 +683,13 @@ class PixUpApp:
                 "For rings, keep the shank crisp but anatomically faithful to the source. "
                 "For earrings, remove hanging fixtures only if they are not part of the product. "
                 "Return one final retouched product image only."
-            self.version = "2.1 Beta 3"
-            ...
-                self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
-                response = client.models.generate_content(
-                    model="gemini-1.5-flash",
-                    contents=[prompt, img],
-                )
+            )
+
+            self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=[prompt, img],
+            )
 
 
             self.log_threadsafe(f"    • Receiving and saving image...", "info")
