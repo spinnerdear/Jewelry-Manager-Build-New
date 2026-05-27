@@ -12,38 +12,31 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
-## Current Status
-
-### 2026-05-26 - Gemini CLI
+### 2026-05-27 - Gemini CLI
 
 Changed files:
-- `jewelry_manager.py` -> `pixup.py`
+- `pixup.py`
 - `GEMINI.md`
-- `README.md`
 - `HANDOFF.md`
 
 Summary:
-- **Project Rebranding:** Renamed everything from "Jewelry Manager" to **PixUp**.
-- **Version Release:** Upgraded to **v2.1 Beta 1**.
-- **Interactive Features:** 
-    - Added **1.6 Earring Merge** (Interactive scale, swap, and 2000x2000 canvas).
-    - Added **1.7 Smart Crop** (Interactive zoom, pan, and 2000x2000 canvas).
-- **UI Refresh:** Rearranged AI tools (1.5, 1.6, 1.7) into a single compact row for better UX.
-- **Infrastructure:** Updated config directory to `.pixup` and standardized config file to `config_v2_1.json`.
+- **Rate Limit & Stability Fixes (v2.1 Beta 4):**
+    - **Exponential Backoff:** Added a retry loop in `retouch_with_gemini_image`. It now retries up to 5 times (4 retries + 1 initial) with doubling wait times (4s, 8s, 16s, 32s) when hitting 429/RESOURCE_EXHAUSTED errors.
+    - **Throttling:** Added a 3.5-second sleep between image requests in `gemini_agent_process` to stay within the 15 RPM Free Tier limit.
+    - **Image Optimization:** 
+        - Reduced thumbnail size to **1200px** (from 1600px) before upload to save Tokens Per Minute (TPM).
+        - Added JPEG quality compression at **85%** and `optimize=True` when saving retouched results.
+- **Improved Logging:** Enhanced the log messages to show retry attempts and throttling status.
+- **Bug Fix:** Fixed `NameError` where `api_key` was used instead of `key` in the AI process thread.
 
 Validation:
 - Passed: `python3 -m py_compile pixup.py`.
-- Verified all title and brand references in UI and Docs.
+- Logical verification of retry loop and throttling timer.
 
 Remaining risks:
-- Local config from older versions (`.jewelry_manager`) will not be automatically migrated; users need to re-enter paths or manually move files to `.pixup`.
+- Persistent network issues or a completely exhausted daily quota (1500 RPD) will still result in a critical error after retries.
 
----
-
-### 2026-05-26 - Gemini CLI (Previous Updates)
-- Removed local retouching fallback.
-- Added Gemini Error handling (Quota/Auth).
-- Added 1.5 Visual Selection.
+## Current Status
 
 ### 2026-05-26 - Codex (Original Updates)
 - Investigated build size (removed rembg/opencv).

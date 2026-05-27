@@ -17,6 +17,7 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
 from PIL import Image, ImageTk, ImageEnhance, ImageOps
 import threading
+import time
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 
@@ -36,7 +37,7 @@ except ImportError:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 3"
+        self.version = "2.1 Beta 4"
         self.root.title(f"PixUp v{self.version}")
 
         self.root.geometry("1200x950")
@@ -428,6 +429,11 @@ class PixUpApp:
             f_n = os.path.basename(folder_path)
             try:
                 for f_p in info["files"]:
+                    # NEW: Throttling to stay within 15 RPM (approx 4s between requests)
+                    if processed_files > 0:
+                        self.log_threadsafe(f"    • Waiting 3.5s to avoid Rate Limit...", "info")
+                        time.sleep(3.5)
+
                     processed_files += 1
                     file_path = os.path.join(folder_path, f_p)
                     self.log_threadsafe(f"[{processed_files}/{total_files}] Processing: {f_p} in {f_n}...", "info")
@@ -665,61 +671,76 @@ class PixUpApp:
         filename = os.path.basename(path)
         name_p, ext = os.path.splitext(filename)
         out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
-        try:
-            self.log_threadsafe(f"    • Connecting to Google Cloud AI...", "info")
-            client = google_genai.Client(api_key=api_key)
-            
-            self.log_threadsafe(f"    • Preparing & Uploading image...", "info")
-            img = Image.open(path).convert("RGB")
-            img.thumbnail((1600, 1600), Image.Resampling.LANCZOS)
+        
+        max_retries = 4
+        retry_delay = 4 # Initial delay in seconds
 
-            prompt = (
-                "Edit this jewelry product photo into a premium e-commerce studio image. "
-                "Keep the exact same jewelry design, stone count, gemstone color, metal color, proportions, and viewing angle. "
-                "Do not invent, remove, or reshape stones, prongs, engraving, shank, hooks, or any jewelry details. "
-                "Cleanly remove the background and replace it with pure white (#ffffff). "
-                "Brighten the jewelry naturally, preserve highlights, recover shadow detail, and avoid making the metal or stones darker. "
-                "Remove dust, fingerprints, gray cast, yellow cast, and small photography artifacts. "
-                "For rings, keep the shank crisp but anatomically faithful to the source. "
-                "For earrings, remove hanging fixtures only if they are not part of the product. "
-                "Return one final retouched product image only."
-            )
+        for attempt in range(max_retries + 1):
+            try:
+                self.log_threadsafe(f"    • Connecting to Google Cloud AI (Attempt {attempt+1}/{max_retries+1})...", "info")
+                client = google_genai.Client(api_key=api_key)
+                
+                # NEW: Image Optimization - Smaller resolution and convert to RGB
+                self.log_threadsafe(f"    • Optimizing & Uploading image...", "info")
+                img = Image.open(path).convert("RGB")
+                # Optimization: Target 1200px (still high quality but saves 40% tokens vs 1600px)
+                img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
 
-            self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=[prompt, img],
-            )
+                prompt = (
+                    "Edit this jewelry product photo into a premium e-commerce studio image. "
+                    "Keep the exact same jewelry design, stone count, gemstone color, metal color, proportions, and viewing angle. "
+                    "Do not invent, remove, or reshape stones, prongs, engraving, shank, hooks, or any jewelry details. "
+                    "Cleanly remove the background and replace it with pure white (#ffffff). "
+                    "Brighten the jewelry naturally, preserve highlights, recover shadow detail, and avoid making the metal or stones darker. "
+                    "Remove dust, fingerprints, gray cast, yellow cast, and small photography artifacts. "
+                    "For rings, keep the shank crisp but anatomically faithful to the source. "
+                    "For earrings, remove hanging fixtures only if they are not part of the product. "
+                    "Return one final retouched product image only."
+                )
 
+                self.log_threadsafe(f"    • AI is processing... (Please wait)", "highlight")
+                response = client.models.generate_content(
+                    model="gemini-1.5-flash",
+                    contents=[prompt, img],
+                )
 
-            self.log_threadsafe(f"    • Receiving and saving image...", "info")
-            for part in response.parts:
-                if getattr(part, "inline_data", None) is not None:
-                    edited = part.as_image()
-                    edited.save(out_path, quality=95, optimize=True)
-                    return True, "", False
+                self.log_threadsafe(f"    • Receiving and saving image...", "info")
+                for part in response.parts:
+                    if getattr(part, "inline_data", None) is not None:
+                        edited = part.as_image()
+                        # Optimization: Save with 85 quality to save disk and keep high fidelity
+                        edited.save(out_path, "JPEG", quality=85, optimize=True)
+                        return True, "", False
 
-            return False, "Gemini returned no image data", False
-        except Exception as e:
-            err_str = str(e)
-            is_critical = False
-            friendly_err = err_str
+                return False, "Gemini returned no image data", False
 
-            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                friendly_err = "โควต้าการใช้งานเต็มแล้ว (Quota Exceeded / Rate Limit). กรุณาเปลี่ยน API Key หรือรอวันถัดไป"
-                is_critical = True
-            elif "401" in err_str or "API_KEY_INVALID" in err_str:
-                friendly_err = "API Key ไม่ถูกต้อง (Invalid API Key). กรุณาตรวจสอบ Key ของคุณ"
-                is_critical = True
-            elif "400" in err_str:
-                friendly_err = "คำขอไม่ถูกต้อง (Bad Request). อาจเกิดจากขนาดไฟล์หรือรูปแบบรูปภาพที่ไม่รองรับ"
-            elif "500" in err_str or "503" in err_str:
-                friendly_err = "เซิร์ฟเวอร์ Google มีปัญหา (Server Error). กรุณาลองใหม่ภายหลัง"
-            elif "DNS" in err_str or "connection" in err_str.lower():
-                friendly_err = "ปัญหาการเชื่อมต่ออินเทอร์เน็ต (Network Error). กรุณาตรวจสอบเน็ตของคุณ"
-                is_critical = True
+            except Exception as e:
+                err_str = str(e)
+                is_critical = False
+                friendly_err = err_str
 
-            return False, friendly_err, is_critical
+                # NEW: Exponential Backoff for Rate Limits (429)
+                if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                    if attempt < max_retries:
+                        self.log_threadsafe(f"    ⚠ Rate Limit hit. Retrying in {retry_delay}s...", "warning")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2 # Exponential increase
+                        continue
+                    else:
+                        friendly_err = "โควต้าการใช้งานเต็มแล้ว (Quota Exceeded). ลองใหม่อีกครั้งพรุ่งนี้หรือเปลี่ยน API Key"
+                        is_critical = True
+                elif "401" in err_str or "API_KEY_INVALID" in err_str:
+                    friendly_err = "API Key ไม่ถูกต้อง (Invalid API Key). กรุณาตรวจสอบ Key ของคุณ"
+                    is_critical = True
+                elif "400" in err_str:
+                    friendly_err = "คำขอไม่ถูกต้อง (Bad Request). อาจเกิดจากขนาดไฟล์หรือรูปแบบรูปภาพที่ไม่รองรับ"
+                elif "500" in err_str or "503" in err_str:
+                    friendly_err = "เซิร์ฟเวอร์ Google มีปัญหา (Server Error). กรุณาลองใหม่ภายหลัง"
+                elif "DNS" in err_str or "connection" in err_str.lower():
+                    friendly_err = "ปัญหาการเชื่อมต่ออินเทอร์เน็ต (Network Error). กรุณาตรวจสอบเน็ตของคุณ"
+                    is_critical = True
+
+                return False, friendly_err, is_critical
 
     def stop_ai_vis(self):
         self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 AI")
