@@ -698,21 +698,29 @@ class PixUpApp:
                     "Return one final retouched product image only."
                 )
 
-                self.version = "2.1 Beta 9"
+                self.version = "2.1 Beta 11"
 
-                self.log_threadsafe(f"    • AI is processing (gemini-2.5-flash with code execution)...", "highlight")
+                self.log_threadsafe(f"    • AI is writing local processing code...", "highlight")
                 
                 response = client.models.generate_content(
                     model="gemini-2.5-flash",
                     contents=[prompt, img],
                     config={
-                        "tools": [{"code_execution": {}}],
                         "system_instruction": "You are a professional jewelry retoucher. "
-                        "You will be provided with an image. "
-                        "Your task is to retouch the jewelry, remove the background (replace with pure white #ffffff), "
-                        "brighten the metal/stones, and return the final image result in the response. "
+                        "Write Python code using Pillow (PIL) to retouch the jewelry image provided. "
+                        "The input image is loaded as 'img'. "
+                        "Remove background (replace with #ffffff). "
+                        "Save the result using 'img.save(output_path)'. "
+                        "Return ONLY the python code in a markdown block."
                     }
                 )
+
+                code = self.extract_code(response.text)
+                if code:
+                    self.log_threadsafe(f"    • Executing local code...", "info")
+                    if self.execute_local_retouch_code(code, img, out_path):
+                        return True, "", False
+                return False, "Failed to generate or execute retouching code", False
 
 
 
