@@ -704,7 +704,11 @@ class PixUpApp:
                     contents=[prompt, img],
                 )
 
+                # DEBUG: Print full response to log area
+                self.log_threadsafe(f"    DEBUG: API Response -> {response}", "info")
+
                 self.log_threadsafe(f"    • Receiving and saving image...", "info")
+
                 for part in response.parts:
                     if getattr(part, "inline_data", None) is not None:
                         edited = part.as_image()
