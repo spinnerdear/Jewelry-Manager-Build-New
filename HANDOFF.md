@@ -1,10 +1,10 @@
-# Project Handoff Log
+# PixUp Handoff Log
 
 Use this file as the shared handoff point between Codex, Gemini CLI, and human edits.
 
 ## Working Rules
 
-- Primary local repo: `/Users/ksdear/Documents/JewelryManager`
+- Primary local repo: `/Users/ksdear/Documents/PixUp`
 - Remote: `https://github.com/spinnerdear/Jewelry-Manager-Build-New.git`
 - Before changing code, read `git status`, this file, and `GEMINI.md`.
 - Do not hardcode API keys, tokens, passwords, or customer data.
@@ -14,77 +14,38 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 
 ## Current Status
 
-### 2026-05-26 - Codex
+### 2026-05-26 - Gemini CLI
 
 Changed files:
-- `jewelry_manager.py`
-- `requirements.txt`
-- `.github/workflows/build.yml`
+- `jewelry_manager.py` -> `pixup.py`
 - `GEMINI.md`
-- `HANDOFF.md`
-
-Summary:
-- Investigated why the built program is large even though retouching should use an AI API.
-- Root cause: the Windows build installed and bundled local AI/CV dependencies (`rembg`, `opencv-python`, `numpy`, `onnxruntime`) and used `pyinstaller --collect-all rembg`.
-- Removed the local AI background-removal stack from runtime and build dependencies.
-- Updated GitHub Actions to install from `requirements.txt` and build without collecting `rembg`.
-- Kept a lightweight Pillow-only fallback for basic exposure/sharpness if Gemini image editing fails.
-
-Validation:
-- Passed: `python3 -m py_compile jewelry_manager.py`.
-- Passed: `git diff --check`.
-- Passed: source/build scan found no remaining runtime/build references to `rembg`, `opencv-python`, `numpy`, `onnxruntime`, `pymatting`, or `--collect-all` outside this handoff note.
-
-Remaining risks:
-- GitHub Actions build artifact size should be checked after the next push.
-- If Gemini image editing is unavailable for the account/key, fallback will not remove the background; it only does light local enhancement.
-
-### 2026-05-26 - Codex
-
-Changed files:
-- `jewelry_manager.py`
-- `requirements.txt`
-- `HANDOFF.md`
-
-Summary:
-- Investigated poor Phase 1.5 output quality. Root cause: the previous flow used Gemini only for text-based parameter planning, then used local `rembg`/OpenCV/Pillow for actual image output.
-- Added a Gemini image-editing path using `gemini-2.5-flash-image` through the `google-genai` SDK.
-- Kept the existing local retouch path as fallback if Gemini image editing is unavailable, returns no image, or raises an API/package error.
-- Added `google-genai` to requirements.
-
-Validation:
-- Passed: `python3 -m py_compile jewelry_manager.py`.
-- Passed: `git diff --check`.
-- Passed: local import check for `from google import genai` after installing `google-genai`.
-
-Remaining risks:
-- Needs manual test with real jewelry photos and a valid Gemini API key.
-- Gemini image editing output may vary by account access, quota, billing, and model availability.
-
-### 2026-05-26 - Codex
-
-Changed files:
-- `jewelry_manager.py`
-- `requirements.txt`
-- `.gitignore`
 - `README.md`
-- `GEMINI.md`
 - `HANDOFF.md`
 
 Summary:
-- Removed the hardcoded Gemini API key default from the app; the app now starts with `GOOGLE_API_KEY` if set, otherwise the user enters the key in the UI.
-- Added thread-safe wrappers for log/progress updates used by background phases.
-- Replaced several silent `except: pass` blocks with visible log messages.
-- Made database collection create missing destination folders instead of silently skipping them.
-- Made rename safer by preserving `_rename_temp` on failure for recovery instead of deleting evidence.
-- Fixed `requirements.txt`, which previously contained literal `\n` text instead of real lines.
-- Added `.gitignore` to keep generated Python/build/env files out of git.
+- **Project Rebranding:** Renamed everything from "Jewelry Manager" to **PixUp**.
+- **Version Release:** Upgraded to **v2.1 Beta 1**.
+- **Interactive Features:** 
+    - Added **1.6 Earring Merge** (Interactive scale, swap, and 2000x2000 canvas).
+    - Added **1.7 Smart Crop** (Interactive zoom, pan, and 2000x2000 canvas).
+- **UI Refresh:** Rearranged AI tools (1.5, 1.6, 1.7) into a single compact row for better UX.
+- **Infrastructure:** Updated config directory to `.pixup` and standardized config file to `config_v2_1.json`.
 
 Validation:
-- Passed: `python3 -m py_compile jewelry_manager.py`.
-- Passed: source scan found no hardcoded Gemini API key value in tracked handoff/docs/app files.
+- Passed: `python3 -m py_compile pixup.py`.
+- Verified all title and brand references in UI and Docs.
 
 Remaining risks:
-- GUI workflow still needs manual testing with a disposable image workspace before use on production files.
-- AI retouch quality claims in README/GEMINI should be validated against real product photos.
-- Existing committed history may already contain an API key; revoke/rotate that key if it was ever pushed.
+- Local config from older versions (`.jewelry_manager`) will not be automatically migrated; users need to re-enter paths or manually move files to `.pixup`.
+
+---
+
+### 2026-05-26 - Gemini CLI (Previous Updates)
+- Removed local retouching fallback.
+- Added Gemini Error handling (Quota/Auth).
+- Added 1.5 Visual Selection.
+
+### 2026-05-26 - Codex (Original Updates)
+- Investigated build size (removed rembg/opencv).
+- Added gemini-2.5-flash-image support.
+- Security updates (no hardcoded keys).

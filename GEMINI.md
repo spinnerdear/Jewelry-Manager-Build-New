@@ -1,9 +1,9 @@
-# Jewelry Media Manager - Project Instructions
+# PixUp - Project Instructions
 
 โปรเจคนี้เป็นเครื่องมือเตรียมรูปสินค้า (Retouching & Organizing) สำหรับ Kh Creation โดยใช้เทคโนโลยี Cloud AI และระบบจัดการไฟล์อัตโนมัติ
 
 ## 🏗 Architectural Overview
-- **Version:** v2.0 Beta 19 (Cloud AI Edition)
+- **Version:** v2.1 Beta 1 (Cloud AI Edition)
 - **Primary AI Agent:** Gemini image editing API (`gemini-2.5-flash-image`)
 - **GUI:** Tkinter (Custom Dark Theme)
 - **Libraries:** `google-genai`, `pillow`, `tkinterdnd2`
@@ -19,10 +19,10 @@
 6.  **Design Preservation QA:** ตรวจสอบโครงสร้างหลัก (จำนวนเพชร, ทรงพลอย) ห้ามผิดเพี้ยนไปจากรูปต้นฉบับ
 
 ## ⚙️ Operational Logic
-- **Cloud Processing (1.5):** ส่งรูปขึ้น Cloud AI เพื่อรีทัชตามเช็คลิสต์ก่อนการเลือกรูปหลัก
+- **Cloud Processing (1.5):** ส่งรูปขึ้น Cloud AI เพื่อรีทัชตามเช็คลิสต์ **(Mandatory: ระบบจะหยุดทำงานทันทีหาก Cloud AI ไม่พร้อมใช้งานหรือโควต้าเต็ม เพื่อรักษาคุณภาพงาน)**
 - **Visual Selection (2.0):** แสดงหน้าจอแกลเลอรี่แบบ Compact (160x160 px, 5 คอลัมน์) เพื่อเลือกรูปหลัก
 - **Sync & Backup (3.0):** ก๊อปปี้ไฟล์ไปยัง Photo 1 (Main) และ Photo 2 (Backup) พร้อมกัน โดยตรวจสอบสถานะไดรฟ์ (E005) ก่อนเริ่ม
-- **Centralized Error Codes:** ใช้รหัสรหัส E001-E007 พร้อมคำอธิบายภาษาไทยใน Log เสมอ
+- **Centralized Error Codes:** ใช้รหัสรหัส E001-E007 พร้อมคำอธิบายภาษาไทยใน Log และแจ้งเตือนด้วย Message Box เมื่อเกิด Critical AI Error
 
 ## ⚡ Engineering & Windows Standards
 - **Lazy Loading:** โหลดไลบรารี AI เฉพาะเมื่อมีการเรียกใช้งานครั้งแรก เพื่อลดเวลาการเปิดโปรแกรม

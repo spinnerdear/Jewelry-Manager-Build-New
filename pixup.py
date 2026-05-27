@@ -33,14 +33,17 @@ try:
 except ImportError:
     HAS_DND = False
 
-class JewelryManagerApp:
+class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.0 Beta 19"
-        self.root.title(f"Jewelry Media Manager v{self.version}")
+        self.version = "2.1 Beta 1"
+        self.root.title(f"PixUp v{self.version}")
 
         self.root.geometry("1200x950")
         self.root.configure(bg="#0f0f12")
+
+        # Memory for AI tasks and Earring status
+        self.ai_tasks = {} # folder_path: {"files": [f1, f2], "is_earring": True/False}
 
         # Centralized Error Codes
         self.error_codes = {
@@ -54,9 +57,9 @@ class JewelryManagerApp:
         }
 
         # Config file path
-        self.config_dir = os.path.join(os.path.expanduser("~"), ".jewelry_manager")
+        self.config_dir = os.path.join(os.path.expanduser("~"), ".pixup")
         if not os.path.exists(self.config_dir): os.makedirs(self.config_dir)
-        self.config_file = os.path.join(self.config_dir, "config_v2_0.json")
+        self.config_file = os.path.join(self.config_dir, "config_v2_1.json")
         self.history_log = os.path.join(self.config_dir, "history_log.txt")
 
         # Variables
@@ -71,11 +74,13 @@ class JewelryManagerApp:
         self.process_states = {
             "phase1": tk.StringVar(value=""),
             "phase1_5": tk.StringVar(value=""),
+            "phase1_6": tk.StringVar(value=""),
+            "phase1_7": tk.StringVar(value=""),
             "phase2": tk.StringVar(value=""),
             "phase3": tk.StringVar(value=""),
             "phase4": tk.StringVar(value="")
         }
-        self.is_running = {"phase1": False, "phase1_5": False, "phase2": False, "phase3": False, "phase4": False}
+        self.is_running = {"phase1": False, "phase1_5": False, "phase1_6": False, "phase1_7": False, "phase2": False, "phase3": False, "phase4": False}
         self.anim_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.anim_idx = 0
 
@@ -185,7 +190,7 @@ class JewelryManagerApp:
 
     def create_widgets(self):
         header = tk.Frame(self.root, bg="#16161d", height=130); header.pack(fill="x")
-        tk.Label(header, text="JEWELRY MEDIA MANAGER", fg=self.colors["accent"], bg="#16161d", font=("Segoe UI", 30, "bold")).pack(pady=(30, 0))
+        tk.Label(header, text="PIXUP", fg=self.colors["accent"], bg="#16161d", font=("Segoe UI", 30, "bold")).pack(pady=(30, 0))
         tk.Label(header, text=f"KH CREATION STUDIO | CLOUD AI {self.version}", fg="#555", bg="#16161d", font=("Segoe UI", 10, "bold")).pack()
 
         main = tk.Frame(self.root, bg=self.colors["bg"], padx=40, pady=25); main.pack(expand=True, fill="both")
@@ -212,7 +217,21 @@ class JewelryManagerApp:
         # --- RIGHT: WORKFLOW ---
         tk.Label(right, text="PRODUCTION WORKFLOW", fg=self.colors["text_dim"], bg=self.colors["bg"], font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 15))
         self.add_wf_step(right, "1. GROUP BY CODE", self.run_phase_1, "phase1")
-        self.ai_btn = self.add_wf_step(right, "1.5 🤖 CLOUD AI RETOUCH", self.run_phase_ai_retouch, "phase1_5", True)
+        
+        # Combined AI Row
+        ai_row = tk.Frame(right, bg=self.colors["bg"]); ai_row.pack(fill="x", pady=5)
+        self.ai_btn = self.create_styled_button(ai_row, "1.5 🤖 AI", self.run_phase_ai_retouch, self.colors["highlight"], "#121212")
+        self.ai_btn.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.merge_btn = self.create_styled_button(ai_row, "1.6 🔗 MERGE", self.run_phase_interactive_merge, "#a362ff", "#fff")
+        self.merge_btn.pack(side="left", fill="x", expand=True, padx=2)
+        self.crop_btn = self.create_styled_button(ai_row, "1.7 ✂️ CROP", self.run_phase_interactive_crop, "#ff9f43", "#000")
+        self.crop_btn.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        
+        # Add labels for progress icons (separate from buttons in this row)
+        ai_p_f = tk.Frame(right, bg=self.colors["bg"]); ai_p_f.pack(fill="x")
+        for k in ["phase1_5", "phase1_6", "phase1_7"]:
+            tk.Label(ai_p_f, textvariable=self.process_states[k], fg=self.colors["accent"], bg=self.colors["bg"], font=("Consolas", 10, "bold")).pack(side="left", expand=True)
+
         self.add_wf_step(right, "2. RENAME & SELECT PRIMARY", self.run_phase_rename, "phase2")
         self.add_wf_step(right, "3. COLLECT TO DATABASE", self.run_phase_backup, "phase3")
         self.add_wf_step(right, "4. MOVE TO ARCHIVE", self.run_phase_archive, "phase4")
@@ -295,59 +314,319 @@ class JewelryManagerApp:
         threading.Thread(target=task, daemon=True).start()
 
     def run_phase_ai_retouch(self):
-        if not HAS_GEMINI_IMAGE: messagebox.showerror("Error", "Google AI image library not found."); return
-        key = self.gemini_key.get().strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
-        if not key: messagebox.showwarning("API Key Missing", "Enter Google API Key."); return
         src = self.source_dir.get()
         if not src or not os.path.exists(src):
             messagebox.showerror("Error", self.error_codes["E001"])
             return
-        all_folders = [os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
-        if not all_folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
-        if not messagebox.askyesno("Confirm", "🚀 Start Advanced Google Cloud AI Retouching? (Pure White & Detail Focus)"): return
+        
+        folders = sorted([os.path.join(src, d) for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"])
+        if not folders: messagebox.showinfo("Info", "Run Phase 1 first."); return
 
+        # Step 1: Visual Selection
+        self.ai_tasks = self.open_visual_ai_selector(folders)
+        if not self.ai_tasks: return # Cancelled or nothing selected
+
+        # Step 2: Processing
+        key = self.gemini_key.get().strip() or os.environ.get("GOOGLE_API_KEY", "").strip()
+        if not key: messagebox.showwarning("API Key Missing", "Enter Google API Key."); return
+        
         self.set_ai_button("disabled", "⌛ CLOUD PROCESSING..."); self.set_running("phase1_5", True)
-        threading.Thread(target=self.gemini_agent_process, args=(all_folders, key), daemon=True).start()
+        threading.Thread(target=self.gemini_agent_process, args=(api_key), daemon=True).start()
 
-    def gemini_agent_process(self, folder_paths, api_key):
-        if not HAS_GEMINI_IMAGE:
-            self.log_threadsafe("Google AI image library not found.", "error", "E006")
-            self.stop_ai_vis()
-            return
+    def open_visual_ai_selector(self, folder_paths):
+        win = tk.Toplevel(self.root); win.title("AI PHOTO SELECTOR"); win.geometry("1100x850"); win.grab_set()
+        win.configure(bg="#0f0f12")
+        
+        tk.Label(win, text="SELECT PHOTOS FOR AI RETOUCH (MAX 2 PER FOLDER)", bg="#0f0f12", fg=self.colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=15)
+        
+        container = tk.Frame(win, bg="#0f0f12"); container.pack(fill="both", expand=True, padx=20)
+        canvas = tk.Canvas(container, bg="#0f0f12", highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        scroll_f = tk.Frame(canvas, bg="#0f0f12"); canvas.create_window((0,0), window=scroll_f, anchor="nw")
+        scroll_f.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        
+        tasks = {} # folder_path: [selected_files]
+        photo_refs = {} # To keep references to PhotoImage objects
 
-        self.set_progress_threadsafe(0, len(folder_paths))
+        for f_path in folder_paths:
+            f_name = os.path.basename(f_path)
+            row = tk.Frame(scroll_f, bg="#1a1a1f", pady=10, padx=10, highlightthickness=1, highlightbackground="#333"); row.pack(fill="x", pady=5)
+            tk.Label(row, text=f_name, bg="#1a1a1f", fg="#aaa", font=("Consolas", 10, "bold"), width=15, anchor="w").pack(side="left", padx=10)
+            
+            img_container = tk.Frame(row, bg="#1a1a1f"); img_container.pack(side="left", fill="x", expand=True)
+            
+            files = sorted([f for f in os.listdir(f_path) if self.is_image_file(f)])
+            tasks[f_path] = []
+            
+            for f in files:
+                try:
+                    full_p = os.path.join(f_path, f)
+                    img = Image.open(full_p); img.thumbnail((120, 120)); ph = ImageTk.PhotoImage(img)
+                    photo_refs[full_p] = ph
+                    
+                    btn = tk.Label(img_container, image=ph, bg="#1a1a1f", borderwidth=2, relief="flat", cursor="hand2")
+                    btn.pack(side="left", padx=4)
+                    
+                    def toggle(f_p=f_path, fn=f, b=btn):
+                        if fn in tasks[f_p]:
+                            tasks[f_p].remove(fn)
+                            b.config(relief="flat", bg="#1a1a1f", highlightthickness=0)
+                        else:
+                            if len(tasks[f_p]) < 2:
+                                tasks[f_p].append(fn)
+                                b.config(relief="solid", bg=self.colors["accent"], highlightthickness=2, highlightbackground=self.colors["accent"])
+                            else:
+                                messagebox.showwarning("Limit", "Max 2 photos per folder.")
+                    
+                    btn.bind("<Button-1>", lambda e, f_p=f_path, fn=f, b=btn: toggle(f_p, fn, b))
+                except: pass
+
+        confirmed = tk.BooleanVar(value=False)
+        def on_ok():
+            # Filter out empty tasks
+            final_tasks = {k: {"files": v, "is_earring": len(v)==2} for k, v in tasks.items() if v}
+            if not final_tasks:
+                messagebox.showwarning("Warning", "Please select at least one photo.")
+                return
+            tasks.clear(); tasks.update(final_tasks)
+            confirmed.set(True); win.destroy()
+
+        tk.Button(win, text="CONFIRM & START AI RETOUCH", command=on_ok, bg=self.colors["accent"], fg="#000", font=("Segoe UI", 11, "bold"), pady=10).pack(fill="x", side="bottom", padx=20, pady=20)
+        
+        self.root.wait_window(win)
+        return tasks if confirmed.get() else None
+
+    def gemini_agent_process(self, api_key):
+        self.set_progress_threadsafe(0, len(self.ai_tasks))
         self.log_threadsafe("AI is performing image retouching...", "highlight")
-        for i, folder in enumerate(folder_paths):
-            f_n = os.path.basename(folder); self.log_threadsafe(f"Processing {f_n}...", "info")
+        
+        for i, (folder_path, info) in enumerate(self.ai_tasks.items()):
+            f_n = os.path.basename(folder_path); self.log_threadsafe(f"Processing {f_n}...", "info")
             try:
-                all_files = sorted([f for f in os.listdir(folder) if self.is_image_file(f) and "_AI" not in f])
-                if not all_files: continue
-                p_t = f_n[0].upper()
-
-                # Rule: Earring 2 images, Others 1 image
-                limit = 2 if p_t == 'E' else 1
-                files_to_ai = all_files[:limit]
-
-                for f_p in files_to_ai:
-                    file_path = os.path.join(folder, f_p)
-                    if self.retouch_with_gemini_image(file_path, folder, p_t, api_key):
+                for f_p in info["files"]:
+                    file_path = os.path.join(folder_path, f_p)
+                    success, err_msg, is_critical = self.retouch_with_gemini_image(file_path, folder_path, "X", api_key)
+                    if success:
                         self.log_threadsafe(f"  > Gemini Image Retouched: {f_p}", "success")
                     else:
-                        plan = self.get_ai_vision_plan(file_path, p_t, api_key)
-                        self.retouch_professional(file_path, folder, p_t, plan)
-                        self.log_threadsafe(f"  > Local Retouched: {f_p}", "warning")
-                
-                if p_t == 'E' and len(files_to_ai) >= 2:
-                    ai_paths = [os.path.join(folder, f.replace(os.path.splitext(f)[1], f"_AI{os.path.splitext(f)[1]}")) for f in files_to_ai]
-                    self.merge_earring_views(ai_paths, folder, f_n)
+                        self.log_threadsafe(f"  > AI Failed for {f_p}: {err_msg}", "error")
+                        if is_critical:
+                            self.log_threadsafe("Critical AI error occurred. Stopping process.", "error")
+                            self.root.after(0, lambda m=err_msg: messagebox.showerror("AI Critical Error", f"กระบวนการหยุดทำงานเนื่องจากข้อผิดพลาดร้ายแรง:\n\n{m}"))
+                            self.stop_ai_vis(); return
             except Exception as e: self.log_threadsafe(f"Error {f_n}: {e}", "error")
             self.set_progress_threadsafe(i + 1)
+            
         self.log_threadsafe("Advanced AI Retouching complete.", "highlight"); self.stop_ai_vis()
-        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished."))
+        self.root.after(0, lambda: messagebox.showinfo("Done", "AI Advanced Retouching Finished. Go to Step 1.6 to Merge Earrings."))
+
+    def run_phase_interactive_merge(self):
+        earring_folders = [k for k, v in self.ai_tasks.items() if v.get("is_earring", False)]
+        if not earring_folders:
+            messagebox.showinfo("Info", "No earring tasks found. Ensure you selected 2 photos in Phase 1.5.")
+            return
+
+        def task():
+            self.set_running("phase1_6", True)
+            for i, f_path in enumerate(earring_folders):
+                f_n = os.path.basename(f_path)
+                selected_files = self.ai_tasks[f_path]["files"]
+                # AI files are named name_AI.ext
+                ai_files = []
+                for f in selected_files:
+                    name_p, ext = os.path.splitext(f)
+                    ai_p = os.path.join(f_path, f"{name_p}_AI{ext}")
+                    if os.path.exists(ai_p): ai_files.append(ai_p)
+                
+                if len(ai_files) < 2:
+                    self.log_threadsafe(f"Skipping {f_n}: AI files not found.", "warning")
+                    continue
+                
+                self.log_threadsafe(f"Merging Earring: {f_n} ({i+1}/{len(earring_folders)})", "info")
+                self.root.after(0, lambda p=ai_files, d=f_path, n=f_n, idx=i+1, total=len(earring_folders): 
+                               self.open_interactive_merge_ui(p, d, n, idx, total))
+                # We need to wait for the UI to close before next folder
+                # This is tricky in a thread, we'll use a threading event
+                self.merge_done_event = threading.Event()
+                self.merge_done_event.wait()
+            
+            self.set_running("phase1_6", False)
+            self.log_threadsafe("Earring Merge Process Finished.", "success")
+        
+        threading.Thread(target=task, daemon=True).start()
+
+    def open_interactive_merge_ui(self, ai_paths, out_dir, folder_name, current, total):
+        win = tk.Toplevel(self.root); win.title(f"MERGE EARRING: {folder_name} ({current}/{total})"); win.geometry("1100x850"); win.grab_set()
+        win.configure(bg="#0f0f12")
+
+        # Workspace Data
+        img_paths = list(ai_paths)
+        scales = [tk.DoubleVar(value=1.0), tk.DoubleVar(value=1.0)]
+        
+        # UI Layout
+        tk.Label(win, text=f"EARING MERGE TOOL - {folder_name}", bg="#0f0f12", fg=self.colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=10)
+        
+        canvas = tk.Canvas(win, width=800, height=800, bg="white", highlightthickness=1, highlightbackground="#444")
+        canvas.pack(pady=10)
+        
+        ctrl = tk.Frame(win, bg="#0f0f12"); ctrl.pack(fill="x", padx=20)
+        
+        def refresh_canvas():
+            canvas.delete("all")
+            try:
+                # Create 2000x2000 composite in memory
+                comp = Image.new('RGB', (2000, 2000), (255, 255, 255))
+                for i, p in enumerate(img_paths):
+                    im = Image.open(p).convert("RGBA")
+                    # Calculate size
+                    base_size = 900
+                    new_w = int(base_size * scales[i].get())
+                    im.thumbnail((new_w, new_w), Image.Resampling.LANCZOS)
+                    
+                    x = 50 + (1000 if i == 1 else 0) + (900 - im.width) // 2
+                    y = (2000 - im.height) // 2
+                    comp.paste(im, (x, y), im)
+                
+                # Show preview
+                preview = comp.copy()
+                preview.thumbnail((800, 800))
+                ph = ImageTk.PhotoImage(preview)
+                canvas.image = ph # Keep ref
+                canvas.create_image(0, 0, image=ph, anchor="nw")
+                return comp
+            except Exception as e: print(f"Refresh Error: {e}")
+
+        # Controls
+        s_f = tk.Frame(ctrl, bg="#0f0f12"); s_f.pack(side="left", padx=20)
+        tk.Label(s_f, text="LEFT SCALE", bg="#0f0f12", fg="#fff", font=("Segoe UI", 8)).pack()
+        tk.Scale(s_f, from_=0.5, to=1.5, resolution=0.05, variable=scales[0], orient="horizontal", bg="#0f0f12", fg="#fff", highlightthickness=0, command=lambda e: refresh_canvas()).pack()
+        
+        s_f2 = tk.Frame(ctrl, bg="#0f0f12"); s_f2.pack(side="left", padx=20)
+        tk.Label(s_f2, text="RIGHT SCALE", bg="#0f0f12", fg="#fff", font=("Segoe UI", 8)).pack()
+        tk.Scale(s_f2, from_=0.5, to=1.5, resolution=0.05, variable=scales[1], orient="horizontal", bg="#0f0f12", fg="#fff", highlightthickness=0, command=lambda e: refresh_canvas()).pack()
+
+        def swap():
+            img_paths[0], img_paths[1] = img_paths[1], img_paths[0]
+            scales[0].set(scales[1].get()) # Optional: swap scales too? User might prefer it.
+            refresh_canvas()
+
+        tk.Button(ctrl, text="⇄ SWAP", command=swap, bg="#333", fg="#fff", width=10).pack(side="left", padx=10)
+        
+        def save_and_next():
+            final = refresh_canvas()
+            final.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
+            win.destroy()
+            self.merge_done_event.set()
+
+        tk.Button(win, text="SAVE & NEXT →", command=save_and_next, bg=self.colors["success"], fg="#000", font=("Segoe UI", 12, "bold"), pady=10).pack(fill="x", padx=100, pady=20)
+        
+        win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.merge_done_event.set()])
+        refresh_canvas()
+
+    def run_phase_interactive_crop(self):
+        # Identify non-earring files that have been AI retouched
+        crop_tasks = []
+        for folder_path, info in self.ai_tasks.items():
+            if not info.get("is_earring", False):
+                for f in info["files"]:
+                    name_p, ext = os.path.splitext(f)
+                    ai_p = os.path.join(folder_path, f"{name_p}_AI{ext}")
+                    if os.path.exists(ai_p):
+                        crop_tasks.append((ai_p, folder_path, f"{name_p}_AI{ext}"))
+        
+        if not crop_tasks:
+            messagebox.showinfo("Info", "No AI-retouched photos found for cropping (excluding earrings).")
+            return
+
+        def task():
+            self.set_running("phase1_7", True)
+            for i, (ai_path, out_dir, filename) in enumerate(crop_tasks):
+                self.log_threadsafe(f"Cropping: {filename} ({i+1}/{len(crop_tasks)})", "info")
+                self.root.after(0, lambda p=ai_path, d=out_dir, n=filename, idx=i+1, total=len(crop_tasks): 
+                               self.open_interactive_crop_ui(p, d, n, idx, total))
+                self.crop_done_event = threading.Event()
+                self.crop_done_event.wait()
+            
+            self.set_running("phase1_7", False)
+            self.log_threadsafe("Image Cropping Process Finished.", "success")
+        
+        threading.Thread(target=task, daemon=True).start()
+
+    def open_interactive_crop_ui(self, img_path, out_dir, filename, current, total):
+        win = tk.Toplevel(self.root); win.title(f"CROP IMAGE: {filename} ({current}/{total})"); win.geometry("1100x900"); win.grab_set()
+        win.configure(bg="#0f0f12")
+
+        # Workspace Data
+        scale = tk.DoubleVar(value=1.0)
+        off_x = tk.IntVar(value=0)
+        off_y = tk.IntVar(value=0)
+        
+        tk.Label(win, text=f"IMAGE CROP & POSITION - {filename}", bg="#0f0f12", fg=self.colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=10)
+        
+        canvas = tk.Canvas(win, width=800, height=800, bg="white", highlightthickness=1, highlightbackground="#444")
+        canvas.pack(pady=10)
+        
+        ctrl = tk.Frame(win, bg="#0f0f12"); ctrl.pack(fill="x", padx=40)
+        
+        def refresh_canvas():
+            canvas.delete("all")
+            try:
+                # Create 2000x2000 composite
+                comp = Image.new('RGB', (2000, 2000), (255, 255, 255))
+                im = Image.open(img_path).convert("RGBA")
+                
+                # Calculate size based on scale
+                base_size = 1800
+                new_w = int(base_size * scale.get())
+                im.thumbnail((new_w, new_w), Image.Resampling.LANCZOS)
+                
+                # Calculate center position + offsets
+                x = (2000 - im.width) // 2 + off_x.get()
+                y = (2000 - im.height) // 2 + off_y.get()
+                
+                comp.paste(im, (x, y), im)
+                
+                # Show preview
+                preview = comp.copy()
+                preview.thumbnail((800, 800))
+                ph = ImageTk.PhotoImage(preview)
+                canvas.image = ph
+                canvas.create_image(0, 0, image=ph, anchor="nw")
+                return comp
+            except Exception as e: print(f"Refresh Error: {e}")
+
+        # Controls Row 1: Scale
+        row1 = tk.Frame(ctrl, bg="#0f0f12"); row1.pack(fill="x", pady=5)
+        tk.Label(row1, text="ZOOM (SCALE)", bg="#0f0f12", fg="#fff", width=15).pack(side="left")
+        tk.Scale(row1, from_=0.1, to=3.0, resolution=0.05, variable=scale, orient="horizontal", bg="#0f0f12", fg="#fff", highlightthickness=0, command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
+
+        # Controls Row 2: X Offset
+        row2 = tk.Frame(ctrl, bg="#0f0f12"); row2.pack(fill="x", pady=5)
+        tk.Label(row2, text="MOVE X (LEFT/RIGHT)", bg="#0f0f12", fg="#fff", width=15).pack(side="left")
+        tk.Scale(row2, from_=-1000, to=1000, variable=off_x, orient="horizontal", bg="#0f0f12", fg="#fff", highlightthickness=0, command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
+
+        # Controls Row 3: Y Offset
+        row3 = tk.Frame(ctrl, bg="#0f0f12"); row3.pack(fill="x", pady=5)
+        tk.Label(row3, text="MOVE Y (UP/DOWN)", bg="#0f0f12", fg="#fff", width=15).pack(side="left")
+        tk.Scale(row3, from_=-1000, to=1000, variable=off_y, orient="horizontal", bg="#0f0f12", fg="#fff", highlightthickness=0, command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
+
+        def save_and_next():
+            final = refresh_canvas()
+            # Overwrite the AI file or save as cropped? Let's overwrite as it's the "final" version for this stage
+            final.save(img_path, "JPEG", quality=95, optimize=True)
+            win.destroy()
+            self.crop_done_event.set()
+
+        tk.Button(win, text="SAVE & NEXT →", command=save_and_next, bg=self.colors["success"], fg="#000", font=("Segoe UI", 12, "bold"), pady=10).pack(fill="x", padx=100, pady=20)
+        
+        win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.crop_done_event.set()])
+        refresh_canvas()
 
     def retouch_with_gemini_image(self, path, out_dir, p_type, api_key):
         if not HAS_GEMINI_IMAGE:
-            return False
+            return False, "Google GenAI library missing", True
 
         filename = os.path.basename(path)
         name_p, ext = os.path.splitext(filename)
@@ -378,37 +657,32 @@ class JewelryManagerApp:
                 if getattr(part, "inline_data", None) is not None:
                     edited = part.as_image()
                     edited.save(out_path, quality=95, optimize=True)
-                    return True
+                    return True, "", False
 
-            self.log_threadsafe(f"Gemini returned no image for {filename}; using local fallback.", "warning")
-            return False
+            return False, "Gemini returned no image data", False
         except Exception as e:
-            self.log_threadsafe(f"Gemini image edit failed for {filename}: {e}", "warning")
-            return False
+            err_str = str(e)
+            is_critical = False
+            friendly_err = err_str
 
-    def get_ai_vision_plan(self, img_path, p_type, key):
-        return {"brightness": 1.1, "contrast": 1.08, "sharpness": 1.8, "focus_area": "auto"}
+            if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                friendly_err = "โควต้าการใช้งานเต็มแล้ว (Quota Exceeded / Rate Limit). กรุณาเปลี่ยน API Key หรือรอวันถัดไป"
+                is_critical = True
+            elif "401" in err_str or "API_KEY_INVALID" in err_str:
+                friendly_err = "API Key ไม่ถูกต้อง (Invalid API Key). กรุณาตรวจสอบ Key ของคุณ"
+                is_critical = True
+            elif "400" in err_str:
+                friendly_err = "คำขอไม่ถูกต้อง (Bad Request). อาจเกิดจากขนาดไฟล์หรือรูปแบบรูปภาพที่ไม่รองรับ"
+            elif "500" in err_str or "503" in err_str:
+                friendly_err = "เซิร์ฟเวอร์ Google มีปัญหา (Server Error). กรุณาลองใหม่ภายหลัง"
+            elif "DNS" in err_str or "connection" in err_str.lower():
+                friendly_err = "ปัญหาการเชื่อมต่ออินเทอร์เน็ต (Network Error). กรุณาตรวจสอบเน็ตของคุณ"
+                is_critical = True
+
+            return False, friendly_err, is_critical
 
     def stop_ai_vis(self):
         self.set_running("phase1_5", False); self.set_ai_button("normal", "1.5 🤖 CLOUD AI RETOUCH")
-
-    def retouch_professional(self, path, out_dir, p_type, plan):
-        filename = os.path.basename(path); name_p, ext = os.path.splitext(filename); out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
-        try:
-            img_pil = Image.open(path).convert("RGB")
-            img_pil = ImageOps.autocontrast(img_pil, cutoff=0.5)
-            img_pil = ImageEnhance.Brightness(img_pil).enhance(plan.get('brightness', 1.1))
-            img_pil = ImageEnhance.Contrast(img_pil).enhance(plan.get('contrast', 1.2))
-
-            s_val = plan.get('sharpness', 2.5)
-            if p_type == 'R': s_val *= 1.3 # Shank Sharpener
-            img_pil = ImageEnhance.Sharpness(img_pil).enhance(s_val)
-
-            img_pil.save(out_path, "JPEG", quality=88, optimize=True, subsampling=0)
-        except Exception as e:
-            self.log_threadsafe(f"Retouch fallback for {filename}: {e}", "warning")
-            img_pil = Image.open(path).convert("RGB")
-            img_pil.save(out_path, "JPEG", quality=85)
 
     def merge_earring_views(self, files, out_dir, folder_name):
         try:
@@ -542,4 +816,4 @@ class JewelryManagerApp:
 if __name__ == "__main__":
     if HAS_DND: root = TkinterDnD.Tk()
     else: root = tk.Tk()
-    app = JewelryManagerApp(root); root.mainloop()
+    app = PixUpApp(root); root.mainloop()
