@@ -699,20 +699,18 @@ class PixUpApp:
                 )
 
                 self.log_threadsafe(f"    • AI is processing (gemini-2.5-flash with code execution)...", "highlight")
-                # Configure model with tools for better processing
-                model = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    config={
-                        "tools": [{"code_execution": {}}],
-                        "system_instruction": "You are a professional jewelry retoucher. "
-                        "You will be provided with an image. "
-                        "Your task is to retouch the jewelry, remove the background (replace with pure white #ffffff), "
-                        "brighten the metal/stones, and return the final image result in the response. "
-                    }
+                
+                model = client.models.GenerativeModel(
+                    model_name="gemini-2.5-flash",
+                    tools=[{"code_execution": {}}],
+                    system_instruction="You are a professional jewelry retoucher. "
+                    "You will be provided with an image. "
+                    "Your task is to retouch the jewelry, remove the background (replace with pure white #ffffff), "
+                    "brighten the metal/stones, and return the final image result in the response. "
                 )
 
                 response = model.generate_content(
-                    contents=[prompt, img],
+                    contents=[prompt, img]
                 )
 
 
