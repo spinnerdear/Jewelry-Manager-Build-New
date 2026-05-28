@@ -320,9 +320,10 @@ class PixUpApp:
         self.build_header(self.root)
         self.build_workspace_bar(self.root)
         self.build_stepper(self.root)
+        # Log bar pinned to bottom (packed before the expanding content so it never gets squeezed)
+        self.build_log(self.root)
         self.content_frame = tk.Frame(self.root, bg=self.colors["bg"])
         self.content_frame.pack(fill="both", expand=True)
-        self.build_log(self.root)
         self.show_step(self.current_step)
 
     def build_header(self, parent):
@@ -356,19 +357,19 @@ class PixUpApp:
 
     def build_stepper(self, parent):
         bar = tk.Frame(parent, bg=self.colors["bg_alt"]); bar.pack(fill="x", padx=30, pady=(14, 0))
-        inner = tk.Frame(bar, bg=self.colors["bg_alt"]); inner.pack(pady=14)
+        inner = tk.Frame(bar, bg=self.colors["bg_alt"]); inner.pack(fill="x", pady=16)
         self.step_widgets = {}
         for i, step in enumerate(self.steps):
-            if i > 0:
-                tk.Label(inner, text="·", bg=self.colors["bg_alt"], fg=self.colors["text_mute"],
-                         font=("Segoe UI", 14)).pack(side="left", padx=2)
-            cell = tk.Frame(inner, bg=self.colors["bg_alt"]); cell.pack(side="left", padx=6)
+            inner.columnconfigure(i, weight=1, uniform="steps")
+            cell = tk.Frame(inner, bg=self.colors["bg_alt"])
+            cell.grid(row=0, column=i, sticky="nsew")
             badge = tk.Label(cell, text=step["id"], width=4, height=2, bg=self.colors["card"],
-                             fg=self.colors["text_dim"], font=("Segoe UI", 11, "bold"), cursor="hand2")
+                             fg=self.colors["text_dim"], font=("Segoe UI", 12, "bold"), cursor="hand2")
             badge.pack()
             name = tk.Label(cell, text=step["subtitle"], bg=self.colors["bg_alt"],
-                            fg=self.colors["text_mute"], font=("Segoe UI", 7), cursor="hand2")
-            name.pack(pady=(4, 0))
+                            fg=self.colors["text_mute"], font=("Segoe UI", 7), cursor="hand2",
+                            wraplength=120, justify="center")
+            name.pack(pady=(5, 0))
             for wdg in (badge, name):
                 wdg.bind("<Button-1>", lambda e, sid=step["id"]: self.show_step(sid))
             self.step_widgets[step["key"]] = {"badge": badge, "name": name, "step": step}
@@ -420,7 +421,7 @@ class PixUpApp:
         self.build_content(step_id)
 
     def build_log(self, parent):
-        wrap = tk.Frame(parent, bg=self.colors["bg"]); wrap.pack(fill="x", padx=30, pady=(0, 16))
+        wrap = tk.Frame(parent, bg=self.colors["bg"]); wrap.pack(side="bottom", fill="x", padx=30, pady=(0, 16))
         self.progress = ttk.Progressbar(wrap, orient="horizontal", mode="determinate",
                                         style="PixUp.Horizontal.TProgressbar")
         self.progress.pack(fill="x", pady=(0, 8))
@@ -545,12 +546,46 @@ class PixUpApp:
         """Per-folder thumbnail selector. Returns {folder_path: [files]} or None if cancelled."""
         win = tk.Toplevel(self.root); win.title(title); win.geometry("1120x860")
         win.grab_set(); win.configure(bg=self.colors["bg"])
-        tk.Label(win, text=title, bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 14, "bold")).pack(pady=(16, 2))
-        if subtitle:
-            tk.Label(win, text=subtitle, bg=self.colors["bg"], fg=self.colors["text_dim"],
-                     font=("Segoe UI", 9)).pack()
 
+        # Header (top)
+        head = tk.Frame(win, bg=self.colors["bg"]); head.pack(fill="x", padx=20, pady=(16, 2))
+        tk.Label(head, text=title, bg=self.colors["bg"], fg=self.colors["accent"],
+                 font=("Segoe UI", 14, "bold")).pack(anchor="w")
+        if subtitle:
+            tk.Label(head, text=subtitle, bg=self.colors["bg"], fg=self.colors["text_dim"],
+                     font=("Segoe UI", 9)).pack(anchor="w")
+
+        sel = {}
+        photo_refs = {}
+        count_var = tk.StringVar(value="เลือกแล้ว 0 รูป")
+
+        def update_count():
+            n = sum(len(v) for v in sel.values())
+            count_var.set(f"เลือกแล้ว {n} รูป")
+
+        # Bottom action bar — packed BEFORE the scroll area so it always stays visible
+        btns = tk.Frame(win, bg=self.colors["bg_alt"]); btns.pack(fill="x", side="bottom")
+        btns_in = tk.Frame(btns, bg=self.colors["bg_alt"]); btns_in.pack(fill="x", padx=20, pady=14)
+        tk.Label(btns_in, textvariable=count_var, bg=self.colors["bg_alt"], fg=self.colors["text"],
+                 font=("Segoe UI", 10, "bold")).pack(side="left")
+        confirmed = {"ok": False}
+
+        def on_ok():
+            final = {k: v for k, v in sel.items() if v}
+            if not final:
+                messagebox.showwarning("แจ้งเตือน", "กรุณาเลือกอย่างน้อย 1 รูป", parent=win)
+                return
+            confirmed["ok"] = True
+            sel.clear(); sel.update(final)
+            win.destroy()
+
+        tk.Button(btns_in, text="ยืนยัน ✓", command=on_ok, bg=self.colors["accent"], fg="#08120f",
+                  font=("Segoe UI", 11, "bold"), padx=28, pady=8, relief="flat", cursor="hand2").pack(side="right")
+        tk.Button(btns_in, text="ยกเลิก", command=win.destroy, bg=self.colors["btn_default"],
+                  fg=self.colors["text"], relief="flat", font=("Segoe UI", 10, "bold"), padx=20, pady=8,
+                  cursor="hand2").pack(side="right", padx=(0, 10))
+
+        # Scroll area (fills remaining space)
         container = tk.Frame(win, bg=self.colors["bg"]); container.pack(fill="both", expand=True, padx=20, pady=10)
         canvas = tk.Canvas(container, bg=self.colors["bg"], highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
@@ -562,8 +597,7 @@ class PixUpApp:
             canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
         canvas.bind_all("<MouseWheel>", _wheel)
 
-        sel = {}
-        photo_refs = {}
+        any_image = False
         for f_path in folder_paths:
             f_name = os.path.basename(f_path)
             row = tk.Frame(scroll_f, bg=self.colors["card"], pady=10, padx=10,
@@ -577,47 +611,38 @@ class PixUpApp:
             except Exception:
                 files = []
             sel[f_path] = []
+            if not files:
+                tk.Label(img_container, text="(ไม่มีรูปในโฟลเดอร์นี้)", bg=self.colors["card"],
+                         fg=self.colors["text_mute"], font=("Segoe UI", 9)).pack(side="left", padx=8)
             for f in files:
                 try:
                     full_p = os.path.join(f_path, f)
                     img = Image.open(full_p); img.thumbnail((110, 110)); ph = ImageTk.PhotoImage(img)
                     photo_refs[full_p] = ph
-                    lbl = tk.Label(img_container, image=ph, bg=self.colors["card"], borderwidth=3,
-                                   relief="flat", cursor="hand2")
-                    lbl.pack(side="left", padx=4)
+                    any_image = True
+                    cell = tk.Frame(img_container, bg=self.colors["card"]); cell.pack(side="left", padx=4)
+                    lbl = tk.Label(cell, image=ph, bg=self.colors["card"], borderwidth=3,
+                                   relief="flat", cursor="hand2",
+                                   highlightthickness=3, highlightbackground=self.colors["card"])
+                    lbl.pack()
 
                     def toggle(f_p=f_path, fn=f, b=lbl):
                         if fn in sel[f_p]:
                             sel[f_p].remove(fn)
-                            b.config(relief="flat", bg=self.colors["card"])
+                            b.config(relief="flat", highlightbackground=self.colors["card"], highlightcolor=self.colors["card"])
                         else:
                             if max_per_folder is not None and len(sel[f_p]) >= max_per_folder:
-                                messagebox.showwarning("จำกัด", f"เลือกได้สูงสุด {max_per_folder} รูป/โฟลเดอร์")
+                                messagebox.showwarning("จำกัด", f"เลือกได้สูงสุด {max_per_folder} รูป/โฟลเดอร์", parent=win)
                                 return
                             sel[f_p].append(fn)
-                            b.config(relief="solid", bg=self.colors["accent"])
+                            b.config(relief="solid", highlightbackground=self.colors["accent"], highlightcolor=self.colors["accent"])
+                        update_count()
                     lbl.bind("<Button-1>", lambda e, f_p=f_path, fn=f, b=lbl: toggle(f_p, fn, b))
                 except Exception:
                     pass
 
-        confirmed = {"ok": False}
-
-        def on_ok():
-            final = {k: v for k, v in sel.items() if v}
-            if not final:
-                messagebox.showwarning("แจ้งเตือน", "กรุณาเลือกอย่างน้อย 1 รูป")
-                return
-            confirmed["ok"] = True
-            sel.clear(); sel.update(final)
-            win.destroy()
-
-        btns = tk.Frame(win, bg=self.colors["bg"]); btns.pack(fill="x", side="bottom", padx=20, pady=16)
-        tk.Button(btns, text="ยกเลิก", command=win.destroy, bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", font=("Segoe UI", 10, "bold"), pady=8,
-                  cursor="hand2").pack(side="left", padx=(0, 8))
-        tk.Button(btns, text="ยืนยัน ✓", command=on_ok, bg=self.colors["accent"], fg="#08120f",
-                  font=("Segoe UI", 11, "bold"), pady=8, relief="flat", cursor="hand2").pack(
-            side="right", fill="x", expand=True)
+        if not any_image:
+            self.log("ไม่พบรูปในโฟลเดอร์ที่เลือก", "warning")
 
         self.root.wait_window(win)
         try:

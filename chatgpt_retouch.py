@@ -143,7 +143,11 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         return False, str(e)
 
 
-async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None):
+def _default_profile_dir():
+    return os.path.join(os.path.expanduser("~"), ".pixup", "chrome_profile")
+
+
+async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, user_data_dir=None):
     if on_log is None:
         on_log = lambda m, l="info": None
     if on_result is None:
@@ -155,20 +159,29 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None):
         on_log(f"ไม่พบ Playwright: {e}  (ติดตั้งด้วย: pip install playwright && playwright install chromium)", "error")
         return
 
+    # Persistent profile = ล็อกอิน ChatGPT ครั้งเดียว แล้วจำ session ไว้ครั้งต่อไป
+    profile = user_data_dir or _default_profile_dir()
+    try:
+        os.makedirs(profile, exist_ok=True)
+    except Exception:
+        pass
+    on_log(f"    • ใช้โปรไฟล์เบราว์เซอร์: {profile}")
+    on_log("    • ครั้งแรกให้ล็อกอิน ChatGPT ในหน้าต่างที่เปิดขึ้น — ครั้งต่อไปจะจำ session ให้", "warning")
+
     async with async_playwright() as p:
+        launch_args = {
+            "headless": False,
+            "viewport": {"width": 1366, "height": 768},
+            "args": ["--disable-blink-features=AutomationControlled", "--start-maximized"],
+        }
         try:
-            browser = await p.chromium.launch(
-                headless=False, channel="chrome",
-                args=["--start-maximized", "--disable-blink-features=AutomationControlled"],
-            )
-        except Exception:
-            # ไม่มี Chrome ของระบบ → ใช้ chromium ที่ playwright ติดตั้งไว้
-            browser = await p.chromium.launch(
-                headless=False,
-                args=["--start-maximized", "--disable-blink-features=AutomationControlled"],
-            )
-        context = await browser.new_context(viewport={"width": 1366, "height": 768})
-        page = await context.new_page()
+            # ใช้ Google Chrome ของเครื่อง (โปรไฟล์ที่ล็อกอินไว้)
+            context = await p.chromium.launch_persistent_context(profile, channel="chrome", **launch_args)
+        except Exception as e:
+            on_log(f"    • เปิด Chrome ไม่ได้ ({e}) — ใช้ Chromium ของ Playwright แทน", "warning")
+            context = await p.chromium.launch_persistent_context(profile, **launch_args)
+
+        page = context.pages[0] if context.pages else await context.new_page()
 
         total = sum(len(v["files"]) for v in tasks.values())
         done = 0
@@ -186,7 +199,7 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None):
                     on_log("    • รอ 5 วินาทีก่อนรูปถัดไป...")
                     await asyncio.sleep(5)
 
-        await browser.close()
+        await context.close()
     on_log("ChatGPT retouching complete.", "success")
 
 
