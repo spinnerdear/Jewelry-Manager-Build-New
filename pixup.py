@@ -39,7 +39,7 @@ except Exception:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.2 Beta 1"
+        self.version = "2.2 Beta 2"
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1240x960")
 
@@ -126,6 +126,7 @@ class PixUpApp:
         self.status_var = tk.StringVar(value="")
         self.ai_btn = None
         self.ai_btn_default_text = "🤖  เริ่มรีทัช AI"
+        self.ai_cancel_event = threading.Event()
         self.log_visible = True
 
         self.load_settings()
@@ -230,15 +231,6 @@ class PixUpApp:
 
     def mark_completed(self, step_id):
         self.root.after(0, lambda: self.completed_steps.add(step_id))
-
-    def set_ai_button(self, state, text):
-        def _do():
-            try:
-                if self.ai_btn is not None and self.ai_btn.winfo_exists():
-                    self.ai_btn.config(state=state, text=text)
-            except tk.TclError:
-                pass
-        self.root.after(0, _do)
 
     def is_image_file(self, filename):
         return filename.lower().endswith(IMAGE_EXTENSIONS)
@@ -768,14 +760,31 @@ class PixUpApp:
 
         total = sum(len(v["files"]) for v in self.ai_tasks.values())
         self.log(f"ขั้นตอน 1.5: เริ่มรีทัช {total} รูป ใน {len(self.ai_tasks)} โฟลเดอร์...", "highlight")
-        self.set_ai_button("disabled", "⌛ กำลังประมวลผล...")
+        self.ai_cancel_event.clear()
         self.set_running("phase1_5", True)
+        self._set_ai_btn_cancel()
         threading.Thread(target=self.chatgpt_agent_process, daemon=True).start()
+
+    def _set_ai_btn_cancel(self):
+        try:
+            if self.ai_btn is not None and self.ai_btn.winfo_exists():
+                self.ai_btn.config(text="■ ยกเลิก", bg=self.colors["error"], fg="#ffffff",
+                                   command=self.cancel_ai, state="normal")
+        except tk.TclError:
+            pass
+
+    def cancel_ai(self):
+        self.ai_cancel_event.set()
+        self.log("กำลังยกเลิก... จะหยุดหลังรูปปัจจุบันเสร็จ", "warning")
+        try:
+            if self.ai_btn is not None and self.ai_btn.winfo_exists():
+                self.ai_btn.config(text="⌛ กำลังยกเลิก...", state="disabled")
+        except tk.TclError:
+            pass
 
     def chatgpt_agent_process(self):
         gpt_url = self.chatgpt_url.get().strip()
         self.log_threadsafe("ขั้นตอน 1.5: กำลังเปิดเบราว์เซอร์ ChatGPT...", "highlight")
-        self.log_threadsafe("  ➜ ถ้ายังไม่ได้ล็อกอิน ให้ล็อกอิน ChatGPT ในหน้าต่างที่เปิดขึ้นมา", "warning")
 
         if not HAS_CHATGPT:
             self.log_threadsafe("โหลดโมดูล chatgpt_retouch ไม่ได้ (ตรวจว่ามีไฟล์ chatgpt_retouch.py)", "error")
@@ -791,19 +800,29 @@ class PixUpApp:
                 self.log_threadsafe(f"  > ล้มเหลว {fname}: {error}", "error")
 
         try:
-            chatgpt_retouch.run_retouch_blocking(self.ai_tasks, gpt_url, on_log, on_result)
+            chatgpt_retouch.run_retouch_blocking(self.ai_tasks, gpt_url, on_log, on_result,
+                                                 should_cancel=self.ai_cancel_event.is_set)
         except Exception as e:
             self.log_threadsafe(f"ChatGPT automation error: {e}", "error")
 
-        self.log_threadsafe("ขั้นตอน 1.5: รีทัช AI เสร็จสิ้น", "highlight")
-        self.mark_completed("1.5")
+        if self.ai_cancel_event.is_set():
+            self.log_threadsafe("ขั้นตอน 1.5: ยกเลิกแล้ว", "warning")
+        else:
+            self.log_threadsafe("ขั้นตอน 1.5: รีทัช AI เสร็จสิ้น", "highlight")
+            self.mark_completed("1.5")
         self.stop_ai_vis()
-        self.root.after(0, lambda: messagebox.showinfo(
-            "Done", "รีทัช AI เสร็จสิ้น\nไปขั้นตอน 1.6 (รวมรูป) หรือ 1.7 (ครอบตัด) ต่อได้เลย"))
 
     def stop_ai_vis(self):
         self.set_running("phase1_5", False)
-        self.set_ai_button("normal", self.ai_btn_default_text)
+
+        def _restore():
+            try:
+                if self.ai_btn is not None and self.ai_btn.winfo_exists():
+                    self.ai_btn.config(text=self.ai_btn_default_text, bg=self.colors["highlight"],
+                                       fg="#08120f", command=self.run_phase_ai_retouch, state="normal")
+            except tk.TclError:
+                pass
+        self.root.after(0, _restore)
 
     # ----------------------------- Phase 1.6: Merge (manual selection) -----------------------------
     def run_phase_merge(self):
@@ -844,66 +863,110 @@ class PixUpApp:
 
     def open_interactive_merge_ui(self, ai_paths, out_dir, folder_name, current, total):
         win = tk.Toplevel(self.root); win.title(f"MERGE: {folder_name} ({current}/{total})")
-        win.geometry("1100x850"); win.grab_set(); win.configure(bg=self.colors["bg"])
+        win.geometry("860x880"); win.grab_set(); win.configure(bg=self.colors["bg"])
+        COMP, PV = 2000, 640
 
-        img_paths = list(ai_paths)
-        scales = [tk.DoubleVar(value=1.0), tk.DoubleVar(value=1.0)]
+        try:
+            base_imgs = [Image.open(p).convert("RGBA") for p in ai_paths]
+        except Exception as e:
+            messagebox.showerror("Error", f"เปิดรูปไม่ได้: {e}", parent=win)
+            win.destroy(); self.merge_done_event.set(); return
 
-        tk.Label(win, text=f"รวมรูปต่างหู - {folder_name}", bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 12, "bold")).pack(pady=10)
-        canvas = tk.Canvas(win, width=800, height=800, bg="white", highlightthickness=1,
-                           highlightbackground=self.colors["border"])
-        canvas.pack(pady=10)
-        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(fill="x", padx=20)
+        state = [{"scale": 1.0, "cx": COMP * 0.27, "cy": COMP * 0.5},
+                 {"scale": 1.0, "cx": COMP * 0.73, "cy": COMP * 0.5}]
+        active = {"i": 0}
+        boxes = [None, None]
 
-        def refresh_canvas():
+        tk.Label(win, text=f"รวมรูปต่างหู — {folder_name}", bg=self.colors["bg"], fg=self.colors["accent"],
+                 font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
+        tk.Label(win, text="คลิกเลือกรูป → ลากเพื่อย้าย · ล้อเมาส์เพื่อย่อ/ขยาย",
+                 bg=self.colors["bg"], fg=self.colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
+
+        # Bottom action bar (pinned first so it never gets clipped)
+        bar = tk.Frame(win, bg=self.colors["bg_alt"]); bar.pack(side="bottom", fill="x")
+        barin = tk.Frame(bar, bg=self.colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
+        # Control row (also bottom-pinned, above the action bar)
+        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
+
+        canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
+                           highlightbackground=self.colors["border"], cursor="fleur")
+        canvas.pack(pady=8)
+
+        def build(size):
+            s = size / COMP
+            comp = Image.new('RGB', (size, size), (255, 255, 255))
+            bxs = []
+            for i, im in enumerate(base_imgs):
+                w = max(10, int(900 * state[i]["scale"] * s))
+                t = im.copy(); t.thumbnail((w, w), Image.Resampling.LANCZOS)
+                x = int(state[i]["cx"] * s - t.width / 2)
+                y = int(state[i]["cy"] * s - t.height / 2)
+                comp.paste(t, (x, y), t)
+                bxs.append((x, y, t.width, t.height))
+            return comp, bxs
+
+        def refresh():
             canvas.delete("all")
-            try:
-                comp = Image.new('RGB', (2000, 2000), (255, 255, 255))
-                for i, p in enumerate(img_paths):
-                    im = Image.open(p).convert("RGBA")
-                    base_size = 900
-                    new_w = int(base_size * scales[i].get())
-                    im.thumbnail((new_w, new_w), Image.Resampling.LANCZOS)
-                    x = 50 + (1000 if i == 1 else 0) + (900 - im.width) // 2
-                    y = (2000 - im.height) // 2
-                    comp.paste(im, (x, y), im)
-                preview = comp.copy(); preview.thumbnail((800, 800))
-                ph = ImageTk.PhotoImage(preview)
-                canvas.image = ph
-                canvas.create_image(0, 0, image=ph, anchor="nw")
-                return comp
-            except Exception as e:
-                print(f"Refresh Error: {e}")
+            comp, bxs = build(PV)
+            ph = ImageTk.PhotoImage(comp); canvas.image = ph
+            canvas.create_image(0, 0, image=ph, anchor="nw")
+            for i, b in enumerate(bxs):
+                boxes[i] = b
+                color = self.colors["accent"] if i == active["i"] else self.colors["text_mute"]
+                canvas.create_rectangle(b[0], b[1], b[0] + b[2], b[1] + b[3], outline=color, width=2)
 
-        s_f = tk.Frame(ctrl, bg=self.colors["bg"]); s_f.pack(side="left", padx=20)
-        tk.Label(s_f, text="LEFT SCALE", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack()
-        tk.Scale(s_f, from_=0.5, to=1.5, resolution=0.05, variable=scales[0], orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 command=lambda e: refresh_canvas()).pack()
-        s_f2 = tk.Frame(ctrl, bg=self.colors["bg"]); s_f2.pack(side="left", padx=20)
-        tk.Label(s_f2, text="RIGHT SCALE", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack()
-        tk.Scale(s_f2, from_=0.5, to=1.5, resolution=0.05, variable=scales[1], orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 command=lambda e: refresh_canvas()).pack()
+        drag = {"x": 0, "y": 0}
+
+        def on_press(e):
+            for i in (1, 0):
+                b = boxes[i]
+                if b and b[0] <= e.x <= b[0] + b[2] and b[1] <= e.y <= b[1] + b[3]:
+                    active["i"] = i; break
+            drag["x"], drag["y"] = e.x, e.y
+            refresh()
+
+        def on_drag(e):
+            f = COMP / PV
+            state[active["i"]]["cx"] += (e.x - drag["x"]) * f
+            state[active["i"]]["cy"] += (e.y - drag["y"]) * f
+            drag["x"], drag["y"] = e.x, e.y
+            refresh()
+
+        def on_wheel(e):
+            d = 1.1 if e.delta > 0 else 0.9
+            state[active["i"]]["scale"] = max(0.1, min(3.0, state[active["i"]]["scale"] * d))
+            refresh()
+
+        canvas.bind("<Button-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<MouseWheel>", on_wheel)
+
+        def set_active(i):
+            active["i"] = i; refresh()
+        tk.Button(ctrl, text="◧ ปรับรูปซ้าย", command=lambda: set_active(0), bg=self.colors["btn_default"],
+                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left")
+        tk.Button(ctrl, text="ปรับรูปขวา ◨", command=lambda: set_active(1), bg=self.colors["btn_default"],
+                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(8, 0))
 
         def swap():
-            img_paths[0], img_paths[1] = img_paths[1], img_paths[0]
-            refresh_canvas()
-        tk.Button(ctrl, text="⇄ SWAP", command=swap, bg=self.colors["btn_default"], fg=self.colors["text"],
-                  width=10, relief="flat", cursor="hand2").pack(side="left", padx=10)
+            base_imgs[0], base_imgs[1] = base_imgs[1], base_imgs[0]
+            state[0], state[1] = state[1], state[0]
+            refresh()
+        tk.Button(ctrl, text="⇄ สลับซ้าย-ขวา", command=swap, bg=self.colors["btn_default"],
+                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(8, 0))
 
         def save_and_next():
-            final = refresh_canvas()
-            final.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
-            win.destroy()
-            self.merge_done_event.set()
-        tk.Button(win, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
-                  font=("Segoe UI", 12, "bold"), pady=10, relief="flat", cursor="hand2").pack(
-            fill="x", padx=100, pady=20)
+            comp, _ = build(COMP)
+            comp.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
+            win.destroy(); self.merge_done_event.set()
+        tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
+                  font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
+        tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), self.merge_done_event.set()],
+                  bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
+                  font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
 
         win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.merge_done_event.set()])
-        refresh_canvas()
+        refresh()
 
     # ----------------------------- Phase 1.7: Crop (manual selection) -----------------------------
     def run_phase_crop(self):
@@ -944,65 +1007,95 @@ class PixUpApp:
 
     def open_interactive_crop_ui(self, img_path, out_dir, filename, current, total):
         win = tk.Toplevel(self.root); win.title(f"CROP: {filename} ({current}/{total})")
-        win.geometry("1100x900"); win.grab_set(); win.configure(bg=self.colors["bg"])
+        win.geometry("860x880"); win.grab_set(); win.configure(bg=self.colors["bg"])
+        COMP, PV = 2000, 640
 
-        scale = tk.DoubleVar(value=1.0)
-        off_x = tk.IntVar(value=0)
-        off_y = tk.IntVar(value=0)
+        try:
+            base = Image.open(img_path).convert("RGBA")
+        except Exception as e:
+            messagebox.showerror("Error", f"เปิดรูปไม่ได้: {e}", parent=win)
+            win.destroy(); self.crop_done_event.set(); return
 
-        tk.Label(win, text=f"ครอบตัด & จัดตำแหน่ง - {filename}", bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 12, "bold")).pack(pady=10)
-        canvas = tk.Canvas(win, width=800, height=800, bg="white", highlightthickness=1,
-                           highlightbackground=self.colors["border"])
-        canvas.pack(pady=10)
-        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(fill="x", padx=40)
+        st = {"scale": 1.0, "cx": COMP / 2, "cy": COMP / 2}
+        scale_var = tk.DoubleVar(value=1.0)
 
-        def refresh_canvas():
+        tk.Label(win, text=f"ครอบตัด & จัดตำแหน่ง — {filename}", bg=self.colors["bg"], fg=self.colors["accent"],
+                 font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
+        tk.Label(win, text="ลากเพื่อย้ายรูป · ล้อเมาส์หรือแถบเลื่อนเพื่อซูมเข้า/ออก",
+                 bg=self.colors["bg"], fg=self.colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
+
+        bar = tk.Frame(win, bg=self.colors["bg_alt"]); bar.pack(side="bottom", fill="x")
+        barin = tk.Frame(bar, bg=self.colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
+        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
+
+        canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
+                           highlightbackground=self.colors["border"], cursor="fleur")
+        canvas.pack(pady=8)
+
+        def build(size):
+            s = size / COMP
+            comp = Image.new('RGB', (size, size), (255, 255, 255))
+            w = max(10, int(1800 * st["scale"] * s))
+            t = base.copy(); t.thumbnail((w, w), Image.Resampling.LANCZOS)
+            x = int(st["cx"] * s - t.width / 2)
+            y = int(st["cy"] * s - t.height / 2)
+            comp.paste(t, (x, y), t)
+            return comp
+
+        def refresh():
             canvas.delete("all")
-            try:
-                comp = Image.new('RGB', (2000, 2000), (255, 255, 255))
-                im = Image.open(img_path).convert("RGBA")
-                base_size = 1800
-                new_w = int(base_size * scale.get())
-                im.thumbnail((new_w, new_w), Image.Resampling.LANCZOS)
-                x = (2000 - im.width) // 2 + off_x.get()
-                y = (2000 - im.height) // 2 + off_y.get()
-                comp.paste(im, (x, y), im)
-                preview = comp.copy(); preview.thumbnail((800, 800))
-                ph = ImageTk.PhotoImage(preview)
-                canvas.image = ph
-                canvas.create_image(0, 0, image=ph, anchor="nw")
-                return comp
-            except Exception as e:
-                print(f"Refresh Error: {e}")
+            comp = build(PV)
+            ph = ImageTk.PhotoImage(comp); canvas.image = ph
+            canvas.create_image(0, 0, image=ph, anchor="nw")
 
-        row1 = tk.Frame(ctrl, bg=self.colors["bg"]); row1.pack(fill="x", pady=5)
-        tk.Label(row1, text="ZOOM (SCALE)", bg=self.colors["bg"], fg=self.colors["text"], width=18, anchor="w").pack(side="left")
-        tk.Scale(row1, from_=0.1, to=3.0, resolution=0.05, variable=scale, orient="horizontal",
+        drag = {"x": 0, "y": 0}
+
+        def on_press(e):
+            drag["x"], drag["y"] = e.x, e.y
+
+        def on_drag(e):
+            f = COMP / PV
+            st["cx"] += (e.x - drag["x"]) * f
+            st["cy"] += (e.y - drag["y"]) * f
+            drag["x"], drag["y"] = e.x, e.y
+            refresh()
+
+        def apply_scale(v):
+            st["scale"] = max(0.1, min(3.0, v))
+            refresh()
+
+        def on_wheel(e):
+            d = 1.1 if e.delta > 0 else 0.9
+            apply_scale(st["scale"] * d)
+            scale_var.set(round(st["scale"], 2))
+
+        canvas.bind("<Button-1>", on_press)
+        canvas.bind("<B1-Motion>", on_drag)
+        canvas.bind("<MouseWheel>", on_wheel)
+
+        tk.Label(ctrl, text="ZOOM", bg=self.colors["bg"], fg=self.colors["text"], width=6, anchor="w").pack(side="left")
+        tk.Scale(ctrl, from_=0.1, to=3.0, resolution=0.05, variable=scale_var, orient="horizontal",
                  bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
-        row2 = tk.Frame(ctrl, bg=self.colors["bg"]); row2.pack(fill="x", pady=5)
-        tk.Label(row2, text="MOVE X (ซ้าย/ขวา)", bg=self.colors["bg"], fg=self.colors["text"], width=18, anchor="w").pack(side="left")
-        tk.Scale(row2, from_=-1000, to=1000, variable=off_x, orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
-        row3 = tk.Frame(ctrl, bg=self.colors["bg"]); row3.pack(fill="x", pady=5)
-        tk.Label(row3, text="MOVE Y (บน/ล่าง)", bg=self.colors["bg"], fg=self.colors["text"], width=18, anchor="w").pack(side="left")
-        tk.Scale(row3, from_=-1000, to=1000, variable=off_y, orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 command=lambda e: refresh_canvas()).pack(side="left", fill="x", expand=True)
+                 troughcolor=self.colors["card"], command=lambda e: apply_scale(scale_var.get())).pack(
+            side="left", fill="x", expand=True)
+
+        def reset():
+            st["scale"] = 1.0; st["cx"] = COMP / 2; st["cy"] = COMP / 2
+            scale_var.set(1.0); refresh()
+        tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=self.colors["btn_default"], fg=self.colors["text"],
+                  relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(10, 0))
 
         def save_and_next():
-            final = refresh_canvas()
-            final.save(img_path, "JPEG", quality=95, optimize=True)
-            win.destroy()
-            self.crop_done_event.set()
-        tk.Button(win, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
-                  font=("Segoe UI", 12, "bold"), pady=10, relief="flat", cursor="hand2").pack(
-            fill="x", padx=100, pady=20)
+            build(COMP).save(img_path, "JPEG", quality=95, optimize=True)
+            win.destroy(); self.crop_done_event.set()
+        tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
+                  font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
+        tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), self.crop_done_event.set()],
+                  bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
+                  font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
 
         win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.crop_done_event.set()])
-        refresh_canvas()
+        refresh()
 
     # ----------------------------- Phase 2: Rename & Primary -----------------------------
     def run_phase_rename(self):

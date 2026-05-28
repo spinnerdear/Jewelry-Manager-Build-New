@@ -12,6 +12,20 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-28 (PM-2) - Claude Code — v2.2 Beta 2 (แก้ selector/merge/crop/browser)
+
+Changed files: `pixup.py`, `chatgpt_retouch.py`
+
+Summary:
+- **Selector (1.5/1.6/1.7) กดยืนยันไม่ได้ → แก้:** ปุ่มยืนยัน/ยกเลิกถูก pack ลำดับผิดจนถูกบัง ย้ายแถบปุ่มไป `side="bottom"` pack ก่อนพื้นที่ scroll + เพิ่มตัวนับ "เลือกแล้ว N รูป" + ไฮไลต์รูปที่เลือกด้วยกรอบ (ไม่ทับรูป)
+- **Merge UI (1.6) ปุ่มหาย + ขยับไม่ได้ → แก้:** เดิม canvas 800px สูงเกินหน้าต่างทำให้ปุ่ม Save หลุดจอ → ลด canvas เป็น 640, pin แถบปุ่มล่างสุด, เพิ่ม **ลากย้าย (drag) + ซูมด้วยล้อเมาส์ (wheel)** ต่อรูป, เลือกปรับรูปซ้าย/ขวา, สลับซ้าย-ขวา, render เต็มความละเอียด 2000px ตอน save
+- **Crop UI (1.7) เหมือนกัน → แก้:** ลด canvas 640 + pin ปุ่ม + **ลากย้าย + ซูม (ล้อเมาส์/สไลเดอร์)** + รีเซ็ต
+- **1.5 Cancel button:** ปุ่ม AI กลายเป็น "■ ยกเลิก" สีแดงระหว่างทำงาน (ยกเลิกหลังรูปปัจจุบันผ่าน threading.Event)
+- **1.5 Browser:** เปลี่ยน acquire strategy — (1) ต่อ Chrome ที่เปิด `--remote-debugging-port=9222` อยู่ผ่าน CDP (2) เปิด Chrome ของเครื่องเองด้วย debug port + โปรไฟล์ PixUp (ล็อกอินครั้งเดียว จำตลอด) (3) fallback persistent context. หมายเหตุ: Chrome รุ่นใหม่ห้ามเปิด debug port บนโปรไฟล์หลัก จึงใช้โปรไฟล์แยกของ PixUp — ผู้ใช้ล็อกอินครั้งเดียว
+- bump → **v2.2 Beta 2**
+
+Validation: `py_compile` ทั้งคู่ผ่าน, import chatgpt_retouch ผ่าน (ไม่มี playwright ก็ได้), ไม่เหลือ dangling ref. **ยังต้องทดสอบ GUI จริงบน Windows**
+
 ### 2026-05-28 (PM) - Claude Code — v2.2 Beta 1 (รื้อใหญ่)
 
 Changed files:
