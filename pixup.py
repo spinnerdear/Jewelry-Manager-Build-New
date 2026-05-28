@@ -55,7 +55,7 @@ class PixUpApp:
 
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 13"
+        self.version = "2.1 Beta 14"
         self.root.title(f"PixUp v{self.version}")
 
 
@@ -687,23 +687,28 @@ class PixUpApp:
         if not HAS_GEMINI_IMAGE:
             return False, "Google GenAI library missing", True
 
+        import io
+        from google.genai import types
+
         filename = os.path.basename(path)
         name_p, ext = os.path.splitext(filename)
         out_path = os.path.join(out_dir, f"{name_p}_AI{ext}")
-        
+
         max_retries = 4
-        retry_delay = 4 # Initial delay in seconds
+        retry_delay = 4
 
         for attempt in range(max_retries + 1):
             try:
                 self.log_threadsafe(f"    • Connecting to Google Cloud AI (Attempt {attempt+1}/{max_retries+1})...", "info")
                 client = google_genai.Client(api_key=api_key)
-                
-                # NEW: Image Optimization - Smaller resolution and convert to RGB
+
                 self.log_threadsafe(f"    • Optimizing & Uploading image...", "info")
                 img = Image.open(path).convert("RGB")
-                # Optimization: Target 1200px (still high quality but saves 40% tokens vs 1600px)
                 img.thumbnail((1200, 1200), Image.Resampling.LANCZOS)
+
+                img_buffer = io.BytesIO()
+                img.save(img_buffer, format='JPEG', quality=90)
+                img_bytes = img_buffer.getvalue()
 
                 prompt = (
                     "Edit this jewelry product photo into a premium e-commerce studio image. "
@@ -717,45 +722,24 @@ class PixUpApp:
                     "Return one final retouched product image only."
                 )
 
-                self.version = "2.1 Beta 11"
+                self.log_threadsafe(f"    • Sending to AI for retouching...", "highlight")
 
-                self.log_threadsafe(f"    • AI is writing local processing code...", "highlight")
-                
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=[prompt, img],
-                    config={
-                        "system_instruction": "You are a professional jewelry retoucher. "
-                        "Write Python code using Pillow (PIL) to retouch the jewelry image provided. "
-                        "The input image is loaded as 'img'. "
-                        "Remove background (replace with #ffffff). "
-                        "Save the result using 'img.save(output_path)'. "
-                        "Return ONLY the python code in a markdown block."
-                    }
+                    model="gemini-2.0-flash-preview-image-generation",
+                    contents=[
+                        types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
+                        types.Part.from_text(text=prompt),
+                    ],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE", "TEXT"]
+                    )
                 )
-
-                code = self.extract_code(response.text)
-                if code:
-                    self.log_threadsafe(f"    • Executing local code...", "info")
-                    if self.execute_local_retouch_code(code, img, out_path):
-                        return True, "", False
-                    else:
-                        return False, "Generated code failed to execute", False
-                return False, "Failed to extract code from response", False
-
-
-
-                # DEBUG: Print full response to log area
-                self.log_threadsafe(f"    DEBUG: API Response -> {response}", "info")
 
                 self.log_threadsafe(f"    • Receiving and saving image...", "info")
 
-                for part in response.parts:
-                    if getattr(part, "inline_data", None) is not None:
-                        edited = part.as_image()
-                        self.version = "2.1 Beta 10"
-
-                        # Optimization: Save with quality only if JPEG
+                for part in response.candidates[0].content.parts:
+                    if part.inline_data is not None:
+                        edited = Image.open(io.BytesIO(part.inline_data.data))
                         if out_path.lower().endswith(('.jpg', '.jpeg')):
                             edited.save(out_path, "JPEG", quality=85, optimize=True)
                         else:
@@ -769,12 +753,11 @@ class PixUpApp:
                 is_critical = False
                 friendly_err = err_str
 
-                # NEW: Exponential Backoff for Rate Limits (429)
                 if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                     if attempt < max_retries:
                         self.log_threadsafe(f"    ⚠ Rate Limit hit. Retrying in {retry_delay}s...", "warning")
                         time.sleep(retry_delay)
-                        retry_delay *= 2 # Exponential increase
+                        retry_delay *= 2
                         continue
                     else:
                         friendly_err = "โควต้าการใช้งานเต็มแล้ว (Quota Exceeded). ลองใหม่อีกครั้งพรุ่งนี้หรือเปลี่ยน API Key"

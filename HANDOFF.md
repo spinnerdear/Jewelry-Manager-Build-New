@@ -12,6 +12,27 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-28 - Claude Code
+
+Changed files:
+- `pixup.py`
+- `HANDOFF.md`
+
+Summary:
+- **Critical AI Fix (v2.1 Beta 14):** แก้ปัญหาหลักที่ทำให้ขั้นตอน AI Retouch (1.5) ใช้งานไม่ได้เลย
+    - **ปัญหา 1 - ใช้ Model ผิด:** เปลี่ยนจาก `gemini-2.5-flash` (text-only model) เป็น `gemini-2.0-flash-preview-image-generation` ซึ่งเป็น image editing model ที่รับภาพเข้าและคืนภาพที่แก้แล้วออกมาได้จริง
+    - **ปัญหา 2 - Dead Code:** โค้ดที่รับภาพกลับ (lines 748-765 เดิม) อยู่หลัง `return` จึงไม่รันเลย ลบออกและเขียน image output parsing ใหม่ให้ถูกต้อง
+    - **ปัญหา 3 - Code Generation Approach:** วิธีให้ AI เขียน Python code แล้ว execute local ไม่ทำงานเพราะ PIL ไม่มีความสามารถลบ background ลบทิ้ง ใช้ direct image I/O แทน
+    - **ปรับ API Format:** ใช้ `types.Part.from_bytes()` และ `types.GenerateContentConfig(response_modalities=["IMAGE","TEXT"])` ตามมาตรฐาน google-genai SDK ใหม่
+    - **Parse Response ใหม่:** อ่านภาพจาก `response.candidates[0].content.parts` → `part.inline_data.data` (bytes) → แปลงกลับเป็น PIL Image
+
+Validation:
+- Passed: `python3 -m py_compile pixup.py`
+
+Remaining risks:
+- `gemini-2.0-flash-preview-image-generation` ยังเป็น preview model อาจมีการเปลี่ยน API หรือ deprecate ในอนาคต
+- Rate limit ของ model นี้อาจแตกต่างจาก gemini-2.5-flash ให้ monitor ถ้าเจอ 429 บ่อย
+
 ### 2026-05-27 - Gemini CLI
 
 Changed files:
