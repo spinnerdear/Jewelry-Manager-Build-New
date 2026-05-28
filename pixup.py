@@ -725,7 +725,7 @@ class PixUpApp:
                 self.log_threadsafe(f"    • Sending to AI for retouching...", "highlight")
 
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash-preview-image-generation",
+                    model="gemini-2.0-flash-exp",
                     contents=[
                         types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
                         types.Part.from_text(text=prompt),
@@ -764,6 +764,13 @@ class PixUpApp:
                         is_critical = True
                 elif "401" in err_str or "API_KEY_INVALID" in err_str:
                     friendly_err = "API Key ไม่ถูกต้อง (Invalid API Key). กรุณาตรวจสอบ Key ของคุณ"
+                    is_critical = True
+                elif "404" in err_str or "NOT_FOUND" in err_str:
+                    try:
+                        available = [m.name for m in client.models.list() if "flash" in m.name.lower() or "imagen" in m.name.lower()]
+                        friendly_err = f"Model ไม่พบ. Models ที่ใช้ได้: {', '.join(available[:10])}"
+                    except Exception:
+                        friendly_err = "Model ไม่พบ (404). กรุณาตรวจสอบชื่อ model ใน google-genai SDK"
                     is_critical = True
                 elif "400" in err_str:
                     friendly_err = "คำขอไม่ถูกต้อง (Bad Request). อาจเกิดจากขนาดไฟล์หรือรูปแบบรูปภาพที่ไม่รองรับ"
