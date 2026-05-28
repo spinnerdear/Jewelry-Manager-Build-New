@@ -3,11 +3,13 @@
 โปรเจคนี้เป็นเครื่องมือเตรียมรูปสินค้า (Retouching & Organizing) สำหรับ Kh Creation โดยใช้เทคโนโลยี Cloud AI และระบบจัดการไฟล์อัตโนมัติ
 
 ## 🏗 Architectural Overview
-- **Version:** v2.1 Beta 1 (Cloud AI Edition)
-- **Primary AI Agent:** Gemini image editing API (`gemini-2.5-flash-image`)
-- **GUI:** Tkinter (Custom Dark Theme)
-- **Libraries:** `google-genai`, `pillow`, `tkinterdnd2`
+- **Version:** v2.2 Beta 1 (Wizard UI + ChatGPT Edition)
+- **Primary AI Agent:** ChatGPT Custom GPT ผ่าน browser automation (Playwright) — ไฟล์ `chatgpt_retouch.py`
+  - **เลิกใช้ Gemini API แล้ว** เนื่องจาก free tier ของ `gemini-2.5-flash-image` มีโควต้า = 0 (ต้องเปิด billing)
+- **GUI:** Tkinter — Wizard/Stepper (แถบขั้นตอน 0→1→1.5→1.6→1.7→2→3→4 + พื้นที่ทำงานทีละขั้น + log)
+- **Libraries:** `pillow`, `tkinterdnd2`, `playwright`
 - **Deployment Strategy:** Unified Release (Single Commit) via GitHub Actions
+  - ⚠️ exe ที่ build ต้องมี `chatgpt_retouch.py` ติดไปด้วย และเครื่องปลายทางต้องมี Playwright + Chromium (`playwright install chromium`)
 
 ## 🎯 AI Retouching Standards (Critical Checklist)
 ทุกการประมวลผลผ่าน AI Agent ต้องเป็นไปตามกฎเหล็กของ Kh Creation ดังนี้:
@@ -18,21 +20,26 @@
 5.  **Defect Cleaning:** สแกนและลบรอยนิ้วมือหรือฝุ่นจิ๋วบนชิ้นงาน (ถ้ามี)
 6.  **Design Preservation QA:** ตรวจสอบโครงสร้างหลัก (จำนวนเพชร, ทรงพลอย) ห้ามผิดเพี้ยนไปจากรูปต้นฉบับ
 
-## ⚙️ Operational Logic
-- **Cloud Processing (1.5):** ส่งรูปขึ้น Cloud AI เพื่อรีทัชตามเช็คลิสต์
-    - **Exponential Backoff:** ระบบ Retry อัตโนมัติสูงสุด 5 ครั้งหากเจอ Error 429 โดยเพิ่มเวลารอเป็นเท่าตัว
-    - **Image Optimization:** บีบอัดรูปเหลือ 1200px และคุณภาพ 85% ก่อนส่งเพื่อประหยัดโควต้า TPM
-    - **Throttling:** หน่วงเวลา 3.5 วินาทีระหว่างรูป เพื่อรักษาอัตราการส่งไม่ให้เกิน 15 RPM
-- **Visual Selection (2.0):** แสดงหน้าจอแกลเลอรี่แบบ Compact (160x160 px, 5 คอลัมน์) เพื่อเลือกรูปหลัก
-- **Sync & Backup (3.0):** ก๊อปปี้ไฟล์ไปยัง Photo 1 (Main) และ Photo 2 (Backup) พร้อมกัน โดยตรวจสอบสถานะไดรฟ์ (E005) ก่อนเริ่ม
-- **Centralized Error Codes:** ใช้รหัสรหัส E001-E007 พร้อมคำอธิบายภาษาไทยใน Log และแจ้งเตือนด้วย Message Box เมื่อเกิด Critical AI Error
+## ⚙️ Operational Logic (Workflow)
+- **0. Import New (BETA):** ดึงรูปใหม่จาก Camera Source (เช่น `D:/gemlight box`) อัตโนมัติ
+    - **Import Memory:** จำไฟล์ที่เคยดึงด้วย signature `filename|size|mtime` เก็บใน `~/.pixup/imported_manifest.json` → ไม่ดึงไฟล์เก่าซ้ำ
+    - **Copy ไม่ Move:** คัดลอกเฉพาะไฟล์ใหม่เข้ากลุ่มตามรหัส 4 หลัก โดยต้นฉบับยังอยู่ที่เดิม
+    - มีปุ่ม Reset Import Memory ในหน้า Settings
+- **1. Group by Code:** จัดกลุ่มไฟล์ใน Workspace ตามรหัส 4 หลัก (สำหรับเคสดาวน์โหลดเอง)
+- **1.5 AI Retouch (ChatGPT):** เลือกรูป (สูงสุด 2/โฟลเดอร์) → เปิดเบราว์เซอร์ผ่าน Playwright → อัปโหลดเข้า ChatGPT Custom GPT → ดาวน์โหลดผลเป็นไฟล์ `_AI`
+    - Custom GPT URL ตั้งใน Settings (เว้นว่าง = ใช้ chatgpt.com ปกติ พร้อมส่ง prompt มาตรฐาน)
+- **1.6 Merge:** เลือก 2 รูป/โฟลเดอร์ → หน้าจัดวาง (scale/swap) → บันทึก `<code>-merged.jpg` บนพื้นขาว 2000x2000
+- **1.7 Crop:** เลือกรูปที่จะครอบตัด (หลายรูป) → ปรับ zoom/ตำแหน่ง ทีละรูป
+- **2. Rename & Primary:** เลือกรูปหลัก (gallery 160x160, 5 คอลัมน์) → เปลี่ยนชื่อตามรหัส (มี `_rename_temp` กู้คืน)
+- **3. Collect to DB:** ก๊อปปี้ไป Photo 1 (Main) + Photo 2 (Backup) พร้อมกัน ตรวจไดรฟ์ (E005) ก่อน
+- **4. Archive:** ย้ายเข้าคลังตามปี/เดือน/วัน
+- **Centralized Error Codes:** E001-E007 พร้อมคำอธิบายภาษาไทยใน Log + Message Box
 
 ## ⚡ Engineering & Windows Standards
-- **Lazy Loading:** โหลดไลบรารี AI เฉพาะเมื่อมีการเรียกใช้งานครั้งแรก เพื่อลดเวลาการเปิดโปรแกรม
-- **Non-blocking UI:** กระบวนการหนัก (AI, Copying) ต้องรันบน `threading.Thread` เพื่อป้องกันหน้าจอ GUI ค้าง
-- **File System:** ใช้ `os.path.normpath` และจัดการปัญหา "File already exists" บน Windows โดยการลบไฟล์เดิมก่อน Rename
-- **Secrets:** ห้ามฝัง API key/token ใน source code หรือ README ให้ใช้ environment variable `GOOGLE_API_KEY` หรือกรอกผ่าน UI เท่านั้น
+- **Non-blocking UI:** กระบวนการหนัก (AI, Copying, Import) ต้องรันบน `threading.Thread` และอัปเดต widget ผ่าน `root.after`/`*_threadsafe` เท่านั้น
+- **File System:** ใช้ `os.path.normpath` และจัดการปัญหา "File already exists" บน Windows (Rename ใช้ `_rename_temp`, Import ใช้ suffix `_dup`)
+- **Secrets:** ไม่มี API key แล้ว — การยืนยันตัวตน ChatGPT ใช้ session ในเบราว์เซอร์ (ผู้ใช้ล็อกอินเอง) ห้ามฝัง token ใดๆ ใน source
 - **Handoff:** ก่อนเริ่มงานให้อ่าน `HANDOFF.md` และเมื่อทำเสร็จให้เพิ่มบันทึกว่าแก้อะไร ทดสอบอะไร และยังเหลือ risk อะไร
 
 ---
-*อัปเดตล่าสุด: 2026-05-26 - v2.0 Beta 19 QA/QC handoff rules*
+*อัปเดตล่าสุด: 2026-05-28 - v2.2 Beta 1 (Wizard UI + ChatGPT, ลบ Gemini API, เพิ่ม Step 0 Import)*

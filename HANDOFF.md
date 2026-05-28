@@ -12,7 +12,36 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
-### 2026-05-28 - Claude Code
+### 2026-05-28 (PM) - Claude Code — v2.2 Beta 1 (รื้อใหญ่)
+
+Changed files:
+- `pixup.py` (เขียนใหม่เกือบทั้งไฟล์), `chatgpt_retouch.py`, `requirements.txt`, `GEMINI.md`
+- ลบ `check_quota.py` (helper ของ API)
+
+Summary:
+- **ลบ Gemini API ออกทั้งหมด:** เอา `google-genai`, `retouch_with_gemini_image`, `gemini_agent_process`, `extract_code`, `execute_local_retouch_code`, `merge_earring_views`, ตัวแปร `gemini_key`/`ai_mode`, error E006, ช่อง API key UI ออก (free tier image model โควต้า = 0)
+- **เพิ่มขั้นตอนที่ 0 — Import New (BETA):** ดึงรูปใหม่จาก Camera Source (`D:/gemlight box`) อัตโนมัติ
+    - จำไฟล์ที่เคยดึงด้วย signature `filename|size|mtime` ใน `~/.pixup/imported_manifest.json` → ไม่ดึงซ้ำ
+    - **Copy** (ไม่ move) แยกตามรหัส 4 หลักทันที, ไฟล์ไม่มีรหัสไป `_ungrouped`, ชนชื่อใช้ suffix `_dup`
+    - ปุ่ม Reset Import Memory ในหน้า Settings
+    - **คงปุ่มขั้นตอนที่ 1 (Group) ไว้** สำหรับเคสดาวน์โหลดเอง
+- **1.5 = ChatGPT only:** เลือกรูป → `chatgpt_retouch.py` (Playwright) อัปโหลด/รีทัช/ดาวน์โหลดเป็น `_AI`
+- **1.6 Merge:** ปรับให้เลือก 2 รูป/โฟลเดอร์เองผ่าน selector (เลิกผูกกับ ai_tasks/is_earring)
+- **1.7 Crop:** ปรับให้เลือกรูปที่จะ crop ก่อน (หลายรูป) แล้ววน crop ทีละรูป
+- **UI ใหม่ทั้งหมด — Wizard/Stepper:** Header+ปุ่ม ⚙ Settings, แถบ Workspace, stepper แนวนอนคลิกได้ (0..4) มี pulse/✓/spinner, content panel ต่อขั้น, log console พับได้, Settings เป็นหน้าต่างแยก, palette ใหม่
+- bump เป็น **v2.2 Beta 1**
+
+Validation (บน macOS — รัน GUI จริงไม่ได้):
+- Passed: `python3 -m py_compile pixup.py chatgpt_retouch.py`
+- grep ไม่เหลือ reference ของสัญลักษณ์ที่ลบทั้งหมด
+- Dry-run logic ขั้นตอน 0 ผ่าน: รอบแรก copy 4 ไฟล์ (ข้าม .txt), จัดกลุ่ม 0789/1212/_ungrouped ถูกต้อง, ต้นฉบับยังอยู่ (copy ไม่ move), รอบสอง copy 0 (จำได้), เพิ่มไฟล์ใหม่ copy เฉพาะไฟล์ใหม่, manifest JSON round-trip ผ่าน
+
+Remaining risks:
+- **ยังไม่ได้ทดสอบ GUI จริง** — ต้องเปิดบน Windows เพื่อยืนยันหน้าตา/stepper/animation/selectors
+- `chatgpt_retouch.py` พึ่ง DOM ของ ChatGPT — ถ้า ChatGPT เปลี่ยน UI selector อาจต้องปรับ; การดาวน์โหลดรูปยังไม่ได้ทดสอบกับ ChatGPT จริง
+- **Build exe:** ต้องรวม `chatgpt_retouch.py` เข้า bundle และเครื่องปลายทางต้องติดตั้ง Playwright + Chromium (`pip install playwright && playwright install chromium`) — ตรวจ `.github/workflows/build.yml` ก่อน release
+- Camera Source default ว่าง — ผู้ใช้ต้องตั้งค่า `D:/gemlight box` ในหน้า Settings บนเครื่อง Windows
+
 
 Changed files:
 - `pixup.py`
