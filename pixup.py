@@ -39,7 +39,7 @@ except Exception:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.2 Beta 2"
+        self.version = "2.2 Beta 3"
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1240x960")
 
@@ -71,6 +71,7 @@ class PixUpApp:
         self.archive_dir = tk.StringVar()
         self.camera_source = tk.StringVar()
         self.chatgpt_url = tk.StringVar()
+        self.chrome_profile_dir = tk.StringVar()
         self.type_mapping = {}
 
         # Running state per phase (drives stepper spinner)
@@ -149,6 +150,7 @@ class PixUpApp:
                     self.camera_source.set(data.get('camera_source', ''))
                     if data.get('chatgpt_url'):
                         self.chatgpt_url.set(data.get('chatgpt_url'))
+                    self.chrome_profile_dir.set(data.get('chrome_profile_dir', ''))
                     self.type_mapping = data.get('types', default_types)
             except Exception as e:
                 self.type_mapping = default_types
@@ -160,7 +162,8 @@ class PixUpApp:
         data = {
             'photo1': self.photo1_dir.get(), 'photo2': self.photo2_dir.get(),
             'archive': self.archive_dir.get(), 'camera_source': self.camera_source.get(),
-            'chatgpt_url': self.chatgpt_url.get(), 'types': self.type_mapping,
+            'chatgpt_url': self.chatgpt_url.get(), 'chrome_profile_dir': self.chrome_profile_dir.get(),
+            'types': self.type_mapping,
         }
         with open(self.config_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=4)
@@ -491,6 +494,8 @@ class PixUpApp:
         tk.Entry(cg, textvariable=self.chatgpt_url, font=("Consolas", 9), bg=self.colors["bg"],
                  fg=self.colors["text"], relief="flat", insertbackground="white").pack(fill="x", pady=(8, 0), ipady=6)
 
+        self.add_path_card(body, "CHROME PROFILE (ขั้นสูง · เว้นว่าง = โปรไฟล์ของ PixUp ล็อกอินครั้งเดียว)", self.chrome_profile_dir)
+
         self.create_styled_button(body, "⚙  จัดการหมวดหมู่ (Categories)", self.open_category_manager,
                                   self.colors["btn_default"], self.colors["text"]).pack(fill="x", pady=(14, 6))
         self.create_styled_button(body, "🗑  ล้างความจำการนำเข้า (Reset Import Memory)", self.reset_manifest,
@@ -801,7 +806,8 @@ class PixUpApp:
 
         try:
             chatgpt_retouch.run_retouch_blocking(self.ai_tasks, gpt_url, on_log, on_result,
-                                                 should_cancel=self.ai_cancel_event.is_set)
+                                                 should_cancel=self.ai_cancel_event.is_set,
+                                                 profile_dir=self.chrome_profile_dir.get())
         except Exception as e:
             self.log_threadsafe(f"ChatGPT automation error: {e}", "error")
 
@@ -876,6 +882,7 @@ class PixUpApp:
                  {"scale": 1.0, "cx": COMP * 0.73, "cy": COMP * 0.5}]
         active = {"i": 0}
         boxes = [None, None]
+        MID = COMP / 2
 
         tk.Label(win, text=f"รวมรูปต่างหู — {folder_name}", bg=self.colors["bg"], fg=self.colors["accent"],
                  font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
@@ -892,6 +899,25 @@ class PixUpApp:
                            highlightbackground=self.colors["border"], cursor="fleur")
         canvas.pack(pady=8)
 
+        def comp_size(i):
+            """ขนาดรูป i ในพิกัด composite (longest side = 900*scale)"""
+            im = base_imgs[i]
+            longest = max(10.0, 900 * state[i]["scale"])
+            bw, bh = im.size
+            if bw >= bh:
+                return longest, longest * bh / bw
+            return longest * bw / bh, longest
+
+        def clamp(i):
+            """กันไม่ให้รูปข้ามเส้นกลาง และไม่ให้หลุดขอบ"""
+            cw, ch = comp_size(i)
+            hw, hh = cw / 2, ch / 2
+            if i == 0:   # ซ้าย: ขอบขวาไม่เกินเส้นกลาง
+                state[i]["cx"] = min(max(state[i]["cx"], hw), MID - hw)
+            else:        # ขวา: ขอบซ้ายไม่ต่ำกว่าเส้นกลาง
+                state[i]["cx"] = min(max(state[i]["cx"], MID + hw), COMP - hw)
+            state[i]["cy"] = min(max(state[i]["cy"], hh), COMP - hh)
+
         def build(size):
             s = size / COMP
             comp = Image.new('RGB', (size, size), (255, 255, 255))
@@ -906,10 +932,13 @@ class PixUpApp:
             return comp, bxs
 
         def refresh():
+            clamp(0); clamp(1)
             canvas.delete("all")
             comp, bxs = build(PV)
             ph = ImageTk.PhotoImage(comp); canvas.image = ph
             canvas.create_image(0, 0, image=ph, anchor="nw")
+            # เส้นแบ่งกลาง (เฉพาะบนจอ ไม่ถูกบันทึกลงไฟล์)
+            canvas.create_line(PV / 2, 0, PV / 2, PV, fill=self.colors["highlight"], width=1, dash=(6, 4))
             for i, b in enumerate(bxs):
                 boxes[i] = b
                 color = self.colors["accent"] if i == active["i"] else self.colors["text_mute"]
@@ -1032,13 +1061,18 @@ class PixUpApp:
                            highlightbackground=self.colors["border"], cursor="fleur")
         canvas.pack(pady=8)
 
+        bw, bh = base.size
+
         def build(size):
             s = size / COMP
             comp = Image.new('RGB', (size, size), (255, 255, 255))
-            w = max(10, int(1800 * st["scale"] * s))
-            t = base.copy(); t.thumbnail((w, w), Image.Resampling.LANCZOS)
-            x = int(st["cx"] * s - t.width / 2)
-            y = int(st["cy"] * s - t.height / 2)
+            # COVER: ที่ scale=1 ด้านสั้นเต็มกรอบ ส่วนเกินถูกครอปออกจริง (ไม่เหลือขอบขาว)
+            target = max(10.0, COMP * st["scale"] * s)
+            r = target / min(bw, bh)
+            nw, nh = max(1, int(bw * r)), max(1, int(bh * r))
+            t = base.resize((nw, nh), Image.Resampling.LANCZOS)
+            x = int(st["cx"] * s - nw / 2)
+            y = int(st["cy"] * s - nh / 2)
             comp.paste(t, (x, y), t)
             return comp
 

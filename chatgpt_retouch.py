@@ -12,9 +12,6 @@ import base64
 import json
 import os
 import sys
-import time
-import platform
-import subprocess
 import urllib.request
 
 CDP_PORT = 9222
@@ -153,25 +150,6 @@ def _default_profile_dir():
     return os.path.join(os.path.expanduser("~"), ".pixup", "chrome_profile")
 
 
-def _find_chrome():
-    """Path ของ Google Chrome ตามระบบปฏิบัติการ"""
-    system = platform.system()
-    candidates = []
-    if system == "Windows":
-        for env in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            base = os.environ.get(env)
-            if base:
-                candidates.append(os.path.join(base, "Google", "Chrome", "Application", "chrome.exe"))
-    elif system == "Darwin":
-        candidates.append("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-    else:
-        candidates += ["/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium-browser"]
-    for c in candidates:
-        if c and os.path.exists(c):
-            return c
-    return None
-
-
 def _cdp_alive():
     try:
         urllib.request.urlopen(f"http://127.0.0.1:{CDP_PORT}/json/version", timeout=1)
@@ -180,75 +158,54 @@ def _cdp_alive():
         return False
 
 
-async def _acquire_page(p, on_log):
+async def _acquire_page(p, on_log, profile_dir=None):
     """
-    คืน (page, cleanup_async, owns_browser).
-    ลำดับ: 1) ต่อ Chrome ที่เปิด remote-debugging อยู่  2) เปิด Chrome ของเครื่อง (โปรไฟล์ล็อกอินไว้)
-    พร้อม debug port แล้วต่อ  3) โปรไฟล์สำรองของ PixUp (ล็อกอินครั้งเดียว)
+    คืน (page, cleanup_async).
+    ลำดับ: 1) ถ้ามี Chrome ที่เปิด remote-debugging (port 9222) อยู่ → ต่อกับอันนั้น
+           2) เปิด Chrome ด้วยโปรไฟล์ที่กำหนด (persistent) — ล็อกอินครั้งเดียว จำตลอด
     """
-    # 1) Chrome ที่ผู้ใช้เปิดด้วย --remote-debugging-port อยู่แล้ว
+    # 1) ต่อ Chrome ที่ผู้ใช้เปิดด้วย --remote-debugging-port=9222 เอง (โหมดขั้นสูง)
     if _cdp_alive():
-        on_log("    • พบ Chrome ที่เปิด remote debugging อยู่ — เชื่อมต่อกับเบราว์เซอร์นั้น", "success")
+        on_log("    • พบ Chrome remote-debugging (9222) — เชื่อมต่อกับเบราว์เซอร์ที่เปิดอยู่", "success")
         browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
         ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-        page = await ctx.new_page()
+        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
         async def cleanup():
             try:
                 await page.close()
             except Exception:
                 pass
-        return page, cleanup, False
+        return page, cleanup
 
-    # 2) เปิด Chrome ของเครื่องเองด้วย debug port (ใช้โปรไฟล์ของ PixUp เพื่อเลี่ยงข้อจำกัดของ Chrome
-    #    ที่ห้ามเปิด debug port บนโปรไฟล์หลัก) — ล็อกอินครั้งเดียวจะถูกจำไว้
-    chrome = _find_chrome()
-    profile = _default_profile_dir()
+    # 2) เปิดด้วยโปรไฟล์ persistent (ค่าเริ่มต้น = โปรไฟล์ของ PixUp ที่ล็อกอินครั้งเดียว)
+    profile = profile_dir.strip() if (profile_dir and profile_dir.strip()) else _default_profile_dir()
     try:
         os.makedirs(profile, exist_ok=True)
     except Exception:
         pass
-    if chrome:
-        try:
-            on_log("    • เปิด Chrome ของเครื่อง... (ครั้งแรกให้ล็อกอิน ChatGPT ครั้งเดียว ครั้งต่อไปจะจำให้)", "warning")
-            subprocess.Popen([
-                chrome,
-                f"--remote-debugging-port={CDP_PORT}",
-                f"--user-data-dir={profile}",
-                "--no-first-run", "--no-default-browser-check",
-                "https://chatgpt.com",
-            ])
-            for _ in range(40):
-                if _cdp_alive():
-                    break
-                await asyncio.sleep(0.5)
-            if _cdp_alive():
-                browser = await p.chromium.connect_over_cdp(f"http://127.0.0.1:{CDP_PORT}")
-                ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
-                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+    on_log(f"    • โปรไฟล์เบราว์เซอร์: {profile}")
+    on_log("    • ครั้งแรกให้ล็อกอิน ChatGPT ในหน้าต่างนี้ครั้งเดียว ครั้งต่อไปจะจำให้อัตโนมัติ", "warning")
 
-                async def cleanup():
-                    pass  # ปล่อยให้เบราว์เซอร์เปิดค้างไว้ (เป็นของผู้ใช้)
-                return page, cleanup, False
-            on_log("    • ต่อ Chrome ไม่ได้ (อาจมี Chrome เปิดค้าง — ลองปิดให้หมดก่อน) ใช้โหมดสำรอง", "warning")
-        except Exception as e:
-            on_log(f"    • เปิด Chrome ไม่สำเร็จ: {e} — ใช้โหมดสำรอง", "warning")
-
-    # 3) Fallback: persistent context ของ Playwright
-    async def _launch_persistent(channel=None):
+    async def _launch(channel=None):
         kwargs = {
             "headless": False,
             "viewport": {"width": 1366, "height": 768},
-            "args": ["--disable-blink-features=AutomationControlled", "--start-maximized"],
+            "args": ["--disable-blink-features=AutomationControlled", "--start-maximized",
+                     "--no-first-run", "--no-default-browser-check"],
         }
         if channel:
             kwargs["channel"] = channel
         return await p.chromium.launch_persistent_context(profile, **kwargs)
 
     try:
-        ctx = await _launch_persistent(channel="chrome")
-    except Exception:
-        ctx = await _launch_persistent()
+        ctx = await _launch(channel="chrome")
+    except Exception as e:
+        on_log(f"    • เปิด Google Chrome ไม่ได้ ({e})", "warning")
+        if profile_dir and profile_dir.strip():
+            on_log("    • ถ้าตั้งค่าโปรไฟล์ Chrome หลักไว้ ให้ปิด Chrome ให้หมดก่อนแล้วลองใหม่", "warning")
+        on_log("    • ใช้ Chromium ของ Playwright แทน", "warning")
+        ctx = await _launch()
     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
     async def cleanup():
@@ -256,10 +213,10 @@ async def _acquire_page(p, on_log):
             await ctx.close()
         except Exception:
             pass
-    return page, cleanup, True
+    return page, cleanup
 
 
-async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None):
+async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None, profile_dir=None):
     if on_log is None:
         on_log = lambda m, l="info": None
     if on_result is None:
@@ -274,7 +231,7 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
         return
 
     async with async_playwright() as p:
-        page, cleanup, _owns = await _acquire_page(p, on_log)
+        page, cleanup = await _acquire_page(p, on_log, profile_dir)
 
         total = sum(len(v["files"]) for v in tasks.values())
         done = 0
@@ -304,8 +261,8 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
         on_log("ChatGPT retouching complete.", "success")
 
 
-def run_retouch_blocking(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None):
-    asyncio.run(run_retouch(tasks, custom_gpt_url, on_log, on_result, should_cancel))
+def run_retouch_blocking(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None, profile_dir=None):
+    asyncio.run(run_retouch(tasks, custom_gpt_url, on_log, on_result, should_cancel, profile_dir))
 
 
 if __name__ == "__main__":
