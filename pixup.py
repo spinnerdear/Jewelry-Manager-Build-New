@@ -55,7 +55,7 @@ class PixUpApp:
 
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 14"
+        self.version = "2.1 Beta 15"
         self.root.title(f"PixUp v{self.version}")
 
 
@@ -725,7 +725,7 @@ class PixUpApp:
                 self.log_threadsafe(f"    • Sending to AI for retouching...", "highlight")
 
                 response = client.models.generate_content(
-                    model="gemini-2.0-flash-exp",
+                    model="gemini-2.5-flash-image",
                     contents=[
                         types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"),
                         types.Part.from_text(text=prompt),
