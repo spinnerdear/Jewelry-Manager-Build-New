@@ -44,8 +44,10 @@ class PixUpApp:
 
     def execute_local_retouch_code(self, code, img, output_path):
         try:
+            # Filter out numpy to prevent runtime errors
+            filtered_code = "\n".join([line for line in code.split("\n") if "numpy" not in line and "np." not in line])
             local_scope = {"img": img, "output_path": output_path, "Image": Image, "ImageEnhance": ImageEnhance}
-            exec(code, local_scope)
+            exec(filtered_code, local_scope)
             return True
         except Exception as e:
             self.log_threadsafe(f"Local execution error: {e}", "error")
@@ -53,7 +55,7 @@ class PixUpApp:
 
     def __init__(self, root):
         self.root = root
-        self.version = "2.1 Beta 12"
+        self.version = "2.1 Beta 13"
         self.root.title(f"PixUp v{self.version}")
 
 
@@ -737,7 +739,9 @@ class PixUpApp:
                     self.log_threadsafe(f"    • Executing local code...", "info")
                     if self.execute_local_retouch_code(code, img, out_path):
                         return True, "", False
-                return False, "Failed to generate or execute retouching code", False
+                    else:
+                        return False, "Generated code failed to execute", False
+                return False, "Failed to extract code from response", False
 
 
 
