@@ -1,0 +1,15 @@
+PixUp debug report
+URL: https://chatgpt.com/c/6a191096-7d4c-83ec-9407-466ea5f86cb9
+จำนวน <img> ทั้งหมด: 6
+
+idx | natural(WxH) | shown(WxH) | inAssistant | alt | srcHead
+----------------------------------------------------------------------
+  0 | 120x120 | 24x24 | False | 'ภาพโปรไฟล์' | https://cdn.auth0.com/avatars/sd.png
+  1 | 120x120 | 24x24 | False | 'ภาพโปรไฟล์' | https://cdn.auth0.com/avatars/sd.png
+  2 | 2000x2000 | 256x256 | False | '1212.jpg' | https://chatgpt.com/backend-api/estuary/content?id=file_000000004dfc72088cb2f9d8e34a29f1&f
+  3 | 1254x1254 | 480x480 | False | 'ภาพที่สร้างขึ้น: แหวนเงินขาวกับทับทิมแดง' | https://chatgpt.com/backend-api/estuary/content?id=file_0000000022a07208a559ebf9db117ee6&t
+  4 | 1254x1254 | 480x480 | False | '' | https://chatgpt.com/backend-api/estuary/content?id=file_0000000022a07208a559ebf9db117ee6&t
+  5 | 1254x1254 | 528x528 | False | '' | https://chatgpt.com/backend-api/estuary/content?id=file_0000000022a07208a559ebf9db117ee6&t
+
+===== HTML ของคำตอบล่าสุดของ assistant (ตัด 4000 ตัวอักษร) =====
+(no assistant turn)

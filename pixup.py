@@ -40,7 +40,7 @@ except Exception:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.2 Beta 5"
+        self.version = "2.2 Beta 7"
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1240x960")
 
@@ -930,7 +930,8 @@ class PixUpApp:
         def refresh():
             clamp(0); clamp(1)
             canvas.delete("all")
-            comp = build(PV)
+            # สร้างภาพจริงที่ความละเอียดเต็ม แล้วย่อมาโชว์ → preview ตรงกับไฟล์ที่ save 100%
+            comp = build(COMP).resize((PV, PV), Image.Resampling.BILINEAR)
             ph = ImageTk.PhotoImage(comp); canvas.image = ph
             canvas.create_image(0, 0, image=ph, anchor="nw")
             # กรอบ guide + เส้นแบ่งกลาง (เฉพาะบนจอ ไม่ถูกบันทึกลงไฟล์)
@@ -1094,7 +1095,8 @@ class PixUpApp:
 
         def refresh():
             canvas.delete("all")
-            comp = build(PV)
+            # สร้างภาพจริงที่ความละเอียดเต็ม แล้วย่อมาโชว์ → preview ตรงกับไฟล์ที่ save 100%
+            comp = build(COMP).resize((PV, PV), Image.Resampling.BILINEAR)
             ph = ImageTk.PhotoImage(comp); canvas.image = ph
             canvas.create_image(0, 0, image=ph, anchor="nw")
 

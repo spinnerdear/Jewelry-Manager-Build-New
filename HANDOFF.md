@@ -12,6 +12,24 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-29 (PM) - Claude Code — v2.2 Beta 7 (แก้ 1.5 จาก debug จริง + crop/merge preview)
+
+Changed files: `pixup.py`, `chatgpt_retouch.py` + เพิ่มโหมด `--inspect`
+
+**ใช้โหมด `--inspect` เก็บ DOM จริงของ ChatGPT (debug_report.txt) แล้วเจอ root cause:**
+- รูปผลลัพธ์ alt = "ภาพที่สร้างขึ้น: ..." ขนาด 1254x1254; **รูปที่อัปโหลด alt = ชื่อไฟล์ "1212.jpg" ขนาด 2000x2000** → ระบบเก่าเลือก "ใหญ่สุด" จึงจับรูปอัปโหลดผิด
+- `data-message-author-role="assistant"` **ใช้ไม่ได้แล้ว** (inAssistant=False ทุกรูป, "no assistant turn")
+
+**แก้:**
+- `_FIND_NEW_IMAGE_JS` ใหม่: Pass 1 จับจาก alt marker ("ภาพที่สร้างขึ้น"/"generated image") = แม่นสุด; Pass 2 สำรอง = รูปใหม่ใหญ่สุดที่ไม่ใช่ไฟล์อัปโหลด (ข้าม alt==ชื่อไฟล์) ส่ง `{known, uploaded}` เข้า JS
+- `_LIMIT_TEXT_JS` เปลี่ยนไปอ่าน `<main>` + dialog/alert (ไม่พึ่ง assistant role ที่พังแล้ว, เลี่ยง sidebar "Upgrade")
+- ทดสอบ JS กับ DOM จำลองตาม debug จริง: เลือกรูปผลลัพธ์ถูก + ไม่ false-positive limit
+- โหมด inspect: `python3 chatgpt_retouch.py --inspect` → ทำรีทัชเอง 1 รูป กด Enter → ได้ debug_report.txt + debug_fullpage.png
+- crop/merge: refresh วาดที่ COMP แล้วย่อมาโชว์ → **preview ตรงกับไฟล์ที่ save 100%**
+- ติดตั้งจริงบนเครื่อง Mac: `playwright` 1.60.0 + chromium แล้ว (รัน --inspect ต้องใช้ Terminal จริง ไม่ใช่ `!` ใน Claude Code เพราะต้องกด Enter)
+
+Validation: py_compile + import ผ่าน, ทดสอบ detection JS กับ DOM จำลองผ่าน. **ยังควรรัน 1.5 จริงผ่านปุ่มในแอปอีกครั้งเพื่อยืนยัน end-to-end download**
+
 ### 2026-05-29 - Claude Code — v2.2 Beta 5 (1.5 detection ใหม่ + limit + merge sliders)
 
 Changed files: `pixup.py`, `chatgpt_retouch.py`

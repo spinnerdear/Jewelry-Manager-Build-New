@@ -33,28 +33,48 @@ _SNAPSHOT_JS = """
 () => [...document.querySelectorAll('img')].map(im => im.src).filter(s => s && s.length > 10)
 """
 
-# JS: หา "รูปใหม่ที่ใหญ่พอ" ที่ยังไม่อยู่ใน baseline (known) — ไม่ผูกกับ DOM ของ assistant
+# JS: หารูปผลลัพธ์ที่ AI สร้าง
+#  - Pass 1: ใช้ alt ที่ ChatGPT ติดให้รูปที่สร้าง ("ภาพที่สร้างขึ้น" / "generated image") — แม่นสุด
+#  - Pass 2 (สำรอง): รูปใหม่ที่ใหญ่พอและไม่อยู่ใน baseline โดยข้ามรูปที่เราอัปโหลด (alt = ชื่อไฟล์)
 _FIND_NEW_IMAGE_JS = """
-(known) => {
-    const set = new Set(known);
+(args) => {
+    const known = new Set(args.known || []);
+    const uploaded = (args.uploaded || '').toLowerCase();
+    const markers = ['ภาพที่สร้างขึ้น', 'สร้างขึ้น', 'generated image', 'image generated'];
     const imgs = [...document.querySelectorAll('img')];
+    const rectOf = (im) => {
+        const r = im.getBoundingClientRect();
+        return {src: im.src, x: r.x, y: r.y, w: r.width, h: r.height,
+                nw: im.naturalWidth, nh: im.naturalHeight, alt: im.alt || ''};
+    };
+    const isGen = (alt) => { alt = (alt || '').toLowerCase(); return markers.some(m => alt.includes(m)); };
+
+    // Pass 1: รูปที่ alt บอกว่าเป็นภาพที่สร้างขึ้น
     let best = null, area = 0;
+    for (const im of imgs) {
+        const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
+        if (Math.min(w, h) < 200) continue;
+        if (!isGen(im.alt)) continue;
+        const a = w * h;
+        if (a >= area) { area = a; best = im; }   // >= เพื่อเอาตัวหลังสุด (รูปล่าสุด)
+    }
+    if (best) return rectOf(best);
+
+    // Pass 2: รูปใหม่ที่ใหญ่สุด ที่ไม่ใช่รูปอัปโหลด
+    best = null; area = 0;
     for (const im of imgs) {
         const s = im.src || '';
         if (!s || s.length < 10) continue;
-        if (set.has(s)) continue;
-        // ข้ามไอคอน sprite/svg/อวาตาร์
         if (s.startsWith('data:image/svg')) continue;
-        const w = im.naturalWidth || im.width || 0;
-        const h = im.naturalHeight || im.height || 0;
+        if (known.has(s)) continue;
+        const alt = (im.alt || '').toLowerCase();
+        if (uploaded && alt === uploaded) continue;   // ข้ามรูปที่เราอัปโหลด
+        const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
         if (Math.min(w, h) < 200) continue;
         const a = w * h;
         if (a > area) { area = a; best = im; }
     }
-    if (!best) return null;
-    const r = best.getBoundingClientRect();
-    return {src: best.src, x: r.x, y: r.y, w: r.width, h: r.height,
-            nw: best.naturalWidth, nh: best.naturalHeight};
+    return best ? rectOf(best) : null;
 }
 """
 
@@ -83,13 +103,13 @@ _LIMIT_PHRASES = [
     "ใช้งานครบ", "เกินขีดจำกัด", "ลองใหม่อีกครั้งภายหลัง", "สร้างรูปได้อีกครั้ง",
 ]
 
-# JS: ดึงเฉพาะข้อความในคำตอบล่าสุดของ assistant + กล่อง dialog/alert (เลี่ยง sidebar/upsell)
+# JS: ดึงข้อความจาก <main> (พื้นที่สนทนา) + กล่อง dialog/alert — เลี่ยง sidebar/upsell (อยู่นอก main)
 _LIMIT_TEXT_JS = """
 () => {
     let parts = [];
-    const turns = document.querySelectorAll('[data-message-author-role="assistant"]');
-    if (turns.length) parts.push(turns[turns.length - 1].innerText || '');
     document.querySelectorAll('[role="dialog"], [role="alert"]').forEach(d => parts.push(d.innerText || ''));
+    const main = document.querySelector('main');
+    if (main) parts.push(main.innerText || '');
     return parts.join(' \\n ');
 }
 """
@@ -128,11 +148,12 @@ async def _snapshot_srcs(page):
         return []
 
 
-async def _wait_for_result(page, baseline, on_log, timeout_s=180):
+async def _wait_for_result(page, baseline, uploaded_name, on_log, timeout_s=180):
     """
-    รอรูปใหม่ (ไม่อยู่ใน baseline) จนนิ่ง
+    รอรูปผลลัพธ์ที่ AI สร้างจนนิ่ง
     คืน ("ok", info) | ("limit", message) | ("timeout", None)
     """
+    args = {"known": baseline, "uploaded": uploaded_name}
     last_src = None
     stable = 0
     waited = 0
@@ -145,7 +166,7 @@ async def _wait_for_result(page, baseline, on_log, timeout_s=180):
             return "limit", limit_msg
 
         try:
-            info = await page.evaluate(_FIND_NEW_IMAGE_JS, baseline)
+            info = await page.evaluate(_FIND_NEW_IMAGE_JS, args)
         except Exception:
             info = None
         generating = await _is_generating(page)
@@ -268,7 +289,7 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
                 break
 
         on_log("    • รอ AI สร้างรูป (ไม่เกิน 3 นาที)...")
-        status, info = await _wait_for_result(page, baseline, on_log, timeout_s=180)
+        status, info = await _wait_for_result(page, baseline, filename, on_log, timeout_s=180)
 
         if status == "limit":
             return False, f"ติดลิมิตการใช้งาน: {info}", True
@@ -414,7 +435,106 @@ def run_retouch_blocking(tasks, custom_gpt_url="", on_log=None, on_result=None, 
     asyncio.run(run_retouch(tasks, custom_gpt_url, on_log, on_result, should_cancel, profile_dir))
 
 
+# ============================ DEBUG / INSPECT MODE ============================
+# JS: ลิสต์ทุก <img> บนหน้าแบบละเอียด เพื่อให้เห็นว่าระบบมองเห็นรูปอะไรบ้าง
+_INSPECT_JS = """
+() => {
+    const inAssistant = (el) => !!el.closest('[data-message-author-role="assistant"]');
+    const imgs = [...document.querySelectorAll('img')].map((im, i) => {
+        const r = im.getBoundingClientRect();
+        return {
+            i: i,
+            nw: im.naturalWidth || 0,
+            nh: im.naturalHeight || 0,
+            dw: Math.round(r.width),
+            dh: Math.round(r.height),
+            assistant: inAssistant(im),
+            srcHead: (im.src || '').slice(0, 90),
+            alt: (im.alt || '').slice(0, 40),
+        };
+    });
+    const turns = document.querySelectorAll('[data-message-author-role="assistant"]');
+    const lastHtml = turns.length ? turns[turns.length - 1].outerHTML.slice(0, 4000) : '(no assistant turn)';
+    return {count: imgs.length, imgs: imgs, lastAssistantHtml: lastHtml};
+}
+"""
+
+
+async def run_inspect(image_path="", custom_gpt_url="", profile_dir=None):
+    """โหมดตรวจสอบ: เปิดเบราว์เซอร์ ให้ผู้ใช้ทำรีทัช 1 รูปเอง แล้ว dump สิ่งที่ระบบเห็นเป็นไฟล์ debug_report.txt"""
+    def log(m, l="info"):
+        print(m, flush=True)
+
+    try:
+        from playwright.async_api import async_playwright
+    except Exception as e:
+        print(f"ไม่พบ Playwright: {e}")
+        return
+
+    out_dir = os.path.dirname(os.path.abspath(image_path)) if image_path else os.getcwd()
+    report_path = os.path.join(out_dir, "debug_report.txt")
+    shot_path = os.path.join(out_dir, "debug_fullpage.png")
+
+    async with async_playwright() as p:
+        page, cleanup = await _acquire_page(p, log, profile_dir)
+        target = custom_gpt_url.strip() or "https://chatgpt.com"
+        await page.goto(target, wait_until="domcontentloaded", timeout=30000)
+
+        print("\n" + "=" * 60)
+        print("  PixUp INSPECT MODE")
+        print("  1) ถ้ายังไม่ล็อกอิน ChatGPT ให้ล็อกอินในเบราว์เซอร์ที่เปิดขึ้น")
+        print("  2) อัปโหลดรูป + สั่งรีทัช + รอจนรูปผลลัพธ์ออกมาครบ")
+        print("  3) กลับมาที่หน้าต่างนี้แล้วกด Enter เพื่อเก็บข้อมูล")
+        print("=" * 60 + "\n")
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, input, ">>> กด Enter เมื่อรูปผลลัพธ์ออกมาแล้ว... ")
+
+        try:
+            data = await page.evaluate(_INSPECT_JS)
+        except Exception as e:
+            data = {"count": -1, "imgs": [], "lastAssistantHtml": f"(evaluate error: {e})"}
+
+        try:
+            await page.screenshot(path=shot_path, full_page=True)
+        except Exception:
+            pass
+
+        lines = []
+        lines.append(f"PixUp debug report")
+        lines.append(f"URL: {page.url}")
+        lines.append(f"จำนวน <img> ทั้งหมด: {data.get('count')}")
+        lines.append("")
+        lines.append("idx | natural(WxH) | shown(WxH) | inAssistant | alt | srcHead")
+        lines.append("-" * 70)
+        for im in data.get("imgs", []):
+            lines.append(f"{im['i']:>3} | {im['nw']}x{im['nh']} | {im['dw']}x{im['dh']} | "
+                         f"{im['assistant']} | {im['alt']!r} | {im['srcHead']}")
+        lines.append("")
+        lines.append("===== HTML ของคำตอบล่าสุดของ assistant (ตัด 4000 ตัวอักษร) =====")
+        lines.append(data.get("lastAssistantHtml", ""))
+
+        report = "\n".join(lines)
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(report)
+
+        print("\n" + report[:2000])
+        print("\n... (เต็มในไฟล์)")
+        print(f"\n✔ บันทึกแล้ว:\n   {report_path}\n   {shot_path}")
+        print("➜ ส่งเนื้อหา debug_report.txt (และรูป debug_fullpage.png ถ้าได้) ให้ผู้พัฒนา\n")
+
+        await loop.run_in_executor(None, input, ">>> กด Enter เพื่อปิดเบราว์เซอร์... ")
+        await cleanup()
+
+
 if __name__ == "__main__":
+    # โหมด inspect:  python chatgpt_retouch.py --inspect [image_path] [custom_gpt_url]
+    if len(sys.argv) > 1 and sys.argv[1] == "--inspect":
+        img = sys.argv[2] if len(sys.argv) > 2 else ""
+        url = sys.argv[3] if len(sys.argv) > 3 else ""
+        asyncio.run(run_inspect(img, url))
+        sys.exit(0)
+
     def _log(m, l="info"):
         print(json.dumps({"type": "log", "level": l, "msg": m}, ensure_ascii=False), flush=True)
 
