@@ -8,3 +8,10 @@ build/
 dist/
 *.spec
 *.log
+
+# PixUp debug/inspect artifacts (ห้ามขึ้น git)
+debug_report.txt
+debug_*.png
+_debug_*.png
+*-merged.jpg
+*_AI.jpg

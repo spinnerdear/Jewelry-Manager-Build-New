@@ -16,7 +16,7 @@ from datetime import datetime
 
 import config
 import theme as theme_mod
-import workflow
+import pixup_workflow as workflow  # ชื่อไฟล์ workflow.py ชนกับ hook ของ PyInstaller จึงเปลี่ยนเป็น pixup_workflow
 import dialogs
 
 # Drag & drop (optional)
