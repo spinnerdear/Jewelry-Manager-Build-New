@@ -1,16 +1,59 @@
 # PixUp Handoff Log
 
-Use this file as the shared handoff point between Codex, Gemini CLI, and human edits.
+บันทึกการส่งต่องาน — ปัจจุบันพัฒนาผ่าน **Claude Code** เป็นหลัก
 
 ## Working Rules
 
 - Primary local repo: `/Users/ksdear/Documents/PixUp`
-- Remote: `https://github.com/spinnerdear/Jewelry-Manager-Build-New.git`
-- Before changing code, read `git status`, this file, and `GEMINI.md`.
+- Remote: GitHub `spinnerdear/PixUp`
+- **คู่มือโปรเจกต์หลัก = `CLAUDE.md`** (อ่านก่อนเริ่มงานทุกครั้ง พร้อมไฟล์นี้). `GEMINI.md` เก็บไว้เป็นบันทึกประวัติ
+- Before changing code, read `git status`, this file, and `CLAUDE.md`.
 - Do not hardcode API keys, tokens, passwords, or customer data.
 - Prefer small commits with clear messages over one large mixed change.
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
+
+### 2026-05-29 (PM-4) - Claude Code — v2.3 Beta 1 (รื้อใหญ่: Lightroom UI + แยกโมดูล)
+
+**เปลี่ยนสถาปัตยกรรมเป็น 6 โมดูล:** `pixup.py`(UI/หลัก) · `theme.py` · `config.py` · `dialogs.py` · `workflow.py` · `chatgpt_retouch.py`
+(เดิม pixup.py ไฟล์เดียว ~1400 บรรทัด → แยกเพื่อแก้ง่าย/ประหยัด token)
+
+**UI ใหม่ — Lightroom 3 คอลัมน์:** ซ้าย=STEPS+Workspace, กลาง=card ขั้นปัจจุบัน+ปุ่มเริ่ม, ขวา=panel(เปิดโฟลเดอร์/คำแนะนำ), footer=progress+"x/N"+log. Header มี dropdown ธีม (graphite/midnight/slate) + ปุ่มเลือกสี accent (colorchooser) + Tools + ⚙. **กดขั้นในคอลัมน์ซ้าย→โชว์การ์ด, กดปุ่มเริ่ม=ทำงานเลย** (ขั้นที่มี dialog/preview ถือว่า confirm ในตัว; Archive มี confirm เพราะย้ายไฟล์)
+
+**ลำดับ workflow ใหม่:** 1.นำเข้า → 2.รวมรูป → 3.ครอป → 4.AI → 5.เปลี่ยนชื่อ → 6.เก็บเข้าฐาน → 7.คลัง. "จัดกลุ่มตามรหัส" ย้ายไป Tools (ฉุกเฉิน). เหตุผล: รวม/ครอปก่อน AI = ส่งรูปน้อยลง ประหยัดโควต้า
+
+**ฟีเจอร์ใหม่:**
+- นำเข้าหลายโหมด (ใหม่/ทั้งหมด/ช่วงวันที่/ตามรหัส — รองรับดึงซ้ำ/แก้ไข) via `dialogs.import_options`
+- ธีม + เลือกสี accent (เก็บใน config) — `theme.build_palette`
+- ตัวนับ "x/N" ทุกขั้นที่วนหลายชิ้น + สรุปท้ายขั้น (สำเร็จ/ล้มเหลว/ข้าม/เวลา)
+- ปุ่มเปิดโฟลเดอร์ (workspace/กล้อง/Photo1/log) + ตรวจพื้นที่ว่างก่อน collect
+- Tools menu: จัดกลุ่ม, ล้าง import memory, เปิดโฟลเดอร์, หมวดหมู่
+- รองรับวิดีโอ (นำเข้า/เปลี่ยนชื่อ)
+- **AI ทนทานขึ้น:** ตรวจล็อกอิน(รอผู้ใช้), ตรวจ upload สำเร็จ+แนบใหม่ถ้าพลาด, retry รายรูป 1 ครั้ง, จับ exception ต่อรูป(ไม่ล้ม batch), หยุดทันทีเมื่อลิมิต, on_progress→UI
+
+**คงของเดิมที่ทำงานแล้ว:** detection จับ alt "ภาพที่สร้างขึ้น" + รอ generation เสร็จ, upscale เท่าต้นฉบับ, merge frame-model, crop cover, preview=ภาพจริงย่อ, collect resolver (exists/nearest/new/no_category) ไม่สร้างโฟลเดอร์มั่ว, ไฮไลต์ _AI
+
+**build.yml:** เปลี่ยน version grep เป็น `^VERSION = "..."` (เดิม self.version)
+
+QA: ดู HANDOFF QA section ด้านล่าง / py_compile+import 6 โมดูลผ่าน, smoke test สร้าง UI+สลับขั้น+เปลี่ยนธีมบน Mac ผ่าน, app.* ที่ workflow ใช้ครบ. **ผู้ใช้ต้องเทส GUI คลิกจริง + ขั้น AI กับ ChatGPT**
+
+### 2026-05-29 (PM-3) - Claude Code — v2.2 Beta 9 (upscale + ไฮไลต์ _AI)
+
+ยืนยันจาก log 12:00: 1.5 จับรูปถูกทั้ง 2 ใบ (1254x1254 = รูป AI จริง). ตรวจไฟล์: ต้นฉบับ 2000/2160px, AI 1254px
+- **Upscale รูป AI:** `_upscale_to_match(out_path, original_path)` ใน chatgpt_retouch — หลังดาวน์โหลด ขยายรูป AI ด้วย Lanczos ให้ด้านยาวเท่าต้นฉบับ (1254→2000/2160) เฉพาะเมื่อเล็กกว่า. ทดสอบผ่าน
+- **ไฮไลต์ _AI ในขั้นตอน 2:** `choose_main_file_visual` เรียงไฟล์ `*_AI` ขึ้นก่อน + กรอบเขียว + ป้าย "✨ AI" + ชื่อสีเน้น เพื่อให้เลือกรูปที่รีทัชแล้วง่าย ไม่เผลอเลือกต้นฉบับ
+
+Validation: py_compile + import + ทดสอบ upscale ผ่าน
+
+### 2026-05-29 (PM-2) - Claude Code — v2.2 Beta 8 (1.5 รอ generation + Phase 3 preview/no-autocreate)
+
+Changed files: `pixup.py`, `chatgpt_retouch.py`
+
+จาก log จริง: รูปที่ 2 (1212.jpg) จับได้ 2000x2000 ใน 6 วิ = **รูปอัปโหลด** เพราะ AI ยังสร้างไม่เสร็จ + มีสำเนา upload ที่ alt='' เลยไม่ถูกกรอง
+1. **1.5 รอ generation จริง:** `_wait_for_result` เขียนใหม่ — ระหว่างปุ่ม Stop โชว์ (`_is_generating`) จะ **ไม่รับรูปใด ๆ** (รีเซ็ตตัวนับ). จับรูปที่ alt = marker ("ภาพที่สร้างขึ้น"/"generated image") เป็นหลัก. fallback (รูปใหม่ใหญ่สุดที่ไม่ใช่ไฟล์อัปโหลด) ใช้เฉพาะหลังเห็น generation จบแล้ว ~8 วิ ยังไม่เจอ marker. `_FIND_NEW_IMAGE_JS` คืน `{gen, fb}`, กรอง alt ที่ลงท้าย .jpg/.png (=ชื่อไฟล์อัปโหลด). ทดสอบ DOM จำลอง (กำลังสร้าง→ไม่จับ, เสร็จ→จับ 1254 marker) ผ่าน
+2. **Phase 3 preview + ไม่สร้างโฟลเดอร์ใหม่อัตโนมัติ:** เพิ่ม `_resolve_dest` (exists/nearest/new/no_category) + `_nearest_range_dir` (เดาช่วงใกล้เคียง) + dialog `open_phase3_preview` (thumbnail รูปหลัก + ปลายทาง P1/P2 + สถานะ + checkbox "อนุญาตสร้างโฟลเดอร์ใหม่" default OFF). ไม่พบหมวด=ข้าม+แจ้ง, ช่วงไม่ตรง=ใช้ใกล้เคียง, ใหม่=สร้างต่อเมื่อติ๊ก. ทดสอบ resolver: ไม่สร้างโฟลเดอร์ใหม่ระหว่าง resolve ผ่าน
+
+Validation: py_compile + import + ทดสอบ logic (detection JS, phase3 resolver) ผ่านบนเครื่อง Mac จริง
 
 ### 2026-05-29 (PM) - Claude Code — v2.2 Beta 7 (แก้ 1.5 จาก debug จริง + crop/merge preview)
 

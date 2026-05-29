@@ -12,6 +12,7 @@ import base64
 import json
 import os
 import sys
+import time
 import urllib.request
 
 CDP_PORT = 9222
@@ -33,9 +34,9 @@ _SNAPSHOT_JS = """
 () => [...document.querySelectorAll('img')].map(im => im.src).filter(s => s && s.length > 10)
 """
 
-# JS: หารูปผลลัพธ์ที่ AI สร้าง
-#  - Pass 1: ใช้ alt ที่ ChatGPT ติดให้รูปที่สร้าง ("ภาพที่สร้างขึ้น" / "generated image") — แม่นสุด
-#  - Pass 2 (สำรอง): รูปใหม่ที่ใหญ่พอและไม่อยู่ใน baseline โดยข้ามรูปที่เราอัปโหลด (alt = ชื่อไฟล์)
+# JS: คืนผู้สมัคร 2 แบบในครั้งเดียว
+#  gen = รูปที่ alt บอกว่า "ภาพที่สร้างขึ้น"/"generated image" (เชื่อถือได้สุด)
+#  fb  = รูปใหม่ที่ใหญ่สุด ที่ "ไม่ใช่ไฟล์ที่อัปโหลด" (ใช้เป็นทางสำรองเฉพาะหลัง AI สร้างเสร็จ)
 _FIND_NEW_IMAGE_JS = """
 (args) => {
     const known = new Set(args.known || []);
@@ -48,33 +49,34 @@ _FIND_NEW_IMAGE_JS = """
                 nw: im.naturalWidth, nh: im.naturalHeight, alt: im.alt || ''};
     };
     const isGen = (alt) => { alt = (alt || '').toLowerCase(); return markers.some(m => alt.includes(m)); };
+    const looksLikeFilename = (alt) => /\\.(jpg|jpeg|png|webp|gif)$/i.test((alt || '').trim());
 
-    // Pass 1: รูปที่ alt บอกว่าเป็นภาพที่สร้างขึ้น
-    let best = null, area = 0;
+    // gen: รูปที่ alt บอกว่าเป็นภาพที่สร้างขึ้น (เอาตัวใหญ่สุด/ล่าสุด)
+    let gen = null, gArea = 0;
     for (const im of imgs) {
         const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
         if (Math.min(w, h) < 200) continue;
         if (!isGen(im.alt)) continue;
         const a = w * h;
-        if (a >= area) { area = a; best = im; }   // >= เพื่อเอาตัวหลังสุด (รูปล่าสุด)
+        if (a >= gArea) { gArea = a; gen = im; }
     }
-    if (best) return rectOf(best);
 
-    // Pass 2: รูปใหม่ที่ใหญ่สุด ที่ไม่ใช่รูปอัปโหลด
-    best = null; area = 0;
+    // fb: รูปใหม่ที่ใหญ่สุด ที่ไม่ใช่ไฟล์อัปโหลด (กันไว้เป็นทางสำรอง)
+    let best = null, area = 0;
     for (const im of imgs) {
         const s = im.src || '';
         if (!s || s.length < 10) continue;
         if (s.startsWith('data:image/svg')) continue;
         if (known.has(s)) continue;
         const alt = (im.alt || '').toLowerCase();
+        if (looksLikeFilename(alt)) continue;        // ข้ามรูปที่ alt เป็นชื่อไฟล์ (=รูปอัปโหลด)
         if (uploaded && alt === uploaded) continue;   // ข้ามรูปที่เราอัปโหลด
         const w = im.naturalWidth || 0, h = im.naturalHeight || 0;
         if (Math.min(w, h) < 200) continue;
         const a = w * h;
         if (a > area) { area = a; best = im; }
     }
-    return best ? rectOf(best) : null;
+    return {gen: gen ? rectOf(gen) : null, fb: best ? rectOf(best) : null};
 }
 """
 
@@ -151,12 +153,17 @@ async def _snapshot_srcs(page):
 async def _wait_for_result(page, baseline, uploaded_name, on_log, timeout_s=180):
     """
     รอรูปผลลัพธ์ที่ AI สร้างจนนิ่ง
+    หลักการ: ระหว่าง AI กำลังสร้าง (ปุ่ม Stop โชว์) จะไม่รับรูปใด ๆ (กันไปจับรูปอัปโหลด)
+             แล้วจับรูปที่ alt = "ภาพที่สร้างขึ้น" เป็นหลัก; ถ้าไม่เจอ marker หลังสร้างเสร็จ
+             สักพักค่อยใช้รูปสำรอง (fb)
     คืน ("ok", info) | ("limit", message) | ("timeout", None)
     """
     args = {"known": baseline, "uploaded": uploaded_name}
     last_src = None
     stable = 0
     waited = 0
+    saw_generating = False
+    no_marker_after_gen = 0
     while waited < timeout_s:
         await asyncio.sleep(2)
         waited += 2
@@ -165,20 +172,41 @@ async def _wait_for_result(page, baseline, uploaded_name, on_log, timeout_s=180)
         if limit_msg:
             return "limit", limit_msg
 
-        try:
-            info = await page.evaluate(_FIND_NEW_IMAGE_JS, args)
-        except Exception:
-            info = None
         generating = await _is_generating(page)
+        if generating:
+            # AI กำลังสร้าง — ยังไม่รับรูป รีเซ็ตตัวนับ
+            saw_generating = True
+            last_src = None
+            stable = 0
+            continue
 
-        if info and info.get("src"):
-            if info["src"] == last_src and not generating:
+        try:
+            res = await page.evaluate(_FIND_NEW_IMAGE_JS, args)
+        except Exception:
+            res = None
+        gen = (res or {}).get("gen")
+        fb = (res or {}).get("fb")
+
+        # ทางหลัก: รูปที่ alt บอกว่า "ภาพที่สร้างขึ้น"
+        if gen and gen.get("src"):
+            if gen["src"] == last_src:
                 stable += 1
                 if stable >= 2:
-                    return "ok", info
+                    return "ok", gen
             else:
-                stable = 0
-                last_src = info["src"]
+                last_src = gen["src"]
+                stable = 1
+            continue
+
+        # ทางสำรอง: ใช้ก็ต่อเมื่อเคยเห็น AI สร้าง (saw_generating) แล้วสร้างเสร็จ
+        # แต่ยังไม่เจอ marker นานพอ (~8 วิ) — กันกรณี alt ไม่มี marker
+        last_src = None
+        stable = 0
+        if saw_generating:
+            no_marker_after_gen += 1
+            if no_marker_after_gen >= 4 and fb and fb.get("src"):
+                on_log("    • ไม่พบ alt 'ภาพที่สร้างขึ้น' ใช้รูปใหม่ที่ใหญ่สุดแทน", "info")
+                return "ok", fb
     return "timeout", None
 
 
@@ -237,6 +265,65 @@ async def _save_debug(page, img_path, on_log):
         pass
 
 
+async def _is_logged_in(page):
+    """ตรวจว่าล็อกอิน ChatGPT แล้วหรือยัง (เจอช่องพิมพ์ = ล็อกอินแล้ว)"""
+    for sel in ['#prompt-textarea', 'div[contenteditable="true"]',
+                'button[data-testid="send-button"]', 'input[type="file"]']:
+        try:
+            if await page.locator(sel).count() > 0:
+                return True
+        except Exception:
+            pass
+    # มีปุ่ม Log in / Sign up เด่น = ยังไม่ล็อกอิน
+    return False
+
+
+async def _ensure_logged_in(page, on_log, wait_s=180):
+    """ถ้ายังไม่ล็อกอิน รอให้ผู้ใช้ล็อกอินในเบราว์เซอร์ (ไม่ fail ทันที)"""
+    if await _is_logged_in(page):
+        return True
+    on_log("    ⚠ ยังไม่ได้ล็อกอิน ChatGPT — กรุณาล็อกอินในเบราว์เซอร์ที่เปิดอยู่", "warning")
+    waited = 0
+    while waited < wait_s:
+        await asyncio.sleep(3)
+        waited += 3
+        if await _is_logged_in(page):
+            on_log("    ✓ ล็อกอินแล้ว ทำงานต่อ", "success")
+            return True
+    on_log("    ✖ ยังไม่ล็อกอินภายในเวลาที่กำหนด", "error")
+    return False
+
+
+async def _attach_file(page, img_path, on_log):
+    """แนบไฟล์ + รอจนอัปโหลดขึ้นจริง (เน็ตช้า) คืน True/False"""
+    attach_selectors = [
+        'button[aria-label="Attach files"]', 'button[aria-label*="Attach" i]',
+        'button[aria-label*="แนบ" i]', '[data-testid="attach-button"]',
+        'button[aria-label="Add photos and files"]',
+    ]
+    before = await _snapshot_srcs(page)
+    for sel in attach_selectors:
+        btn = page.locator(sel)
+        try:
+            if await btn.count() > 0:
+                await btn.click(); await asyncio.sleep(0.5); break
+        except Exception:
+            pass
+    try:
+        file_input = page.locator('input[type="file"]').first
+        await file_input.set_input_files(img_path)
+    except Exception as e:
+        on_log(f"    • แนบไฟล์ไม่ได้: {e}", "info")
+        return False
+    # รอ thumbnail ของไฟล์ที่แนบขึ้น (รูปใหม่โผล่ หรือมี progressbar หาย) — สูงสุด 30 วิ
+    for _ in range(30):
+        await asyncio.sleep(1)
+        now = await _snapshot_srcs(page)
+        if len(now) > len(before):
+            return True
+    return True  # ไม่เจอ thumbnail ชัด แต่ปล่อยให้ลองส่งต่อ
+
+
 async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
     """คืน (success, error, is_limit)"""
     filename = os.path.basename(img_path)
@@ -245,29 +332,21 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(3)
 
+        if not await _ensure_logged_in(page, on_log):
+            return False, "ยังไม่ได้ล็อกอิน ChatGPT", True  # หยุดทั้ง batch
+
         # ตรวจลิมิตก่อนเริ่ม (เผื่อโดนตั้งแต่เปิดหน้า)
         pre_limit = await _check_limit(page)
         if pre_limit:
             return False, f"ติดลิมิต: {pre_limit}", True
 
         on_log(f"    • อัปโหลด: {filename}")
-        attach_selectors = [
-            'button[aria-label="Attach files"]',
-            'button[aria-label*="Attach" i]',
-            'button[aria-label*="แนบ" i]',
-            '[data-testid="attach-button"]',
-            'button[aria-label="Add photos and files"]',
-        ]
-        for sel in attach_selectors:
-            btn = page.locator(sel)
-            if await btn.count() > 0:
-                await btn.click()
-                await asyncio.sleep(0.5)
-                break
-
-        file_input = page.locator('input[type="file"]').first
-        await file_input.set_input_files(img_path)
-        await asyncio.sleep(1.5)
+        attached = await _attach_file(page, img_path, on_log)
+        if not attached:
+            on_log("    • ลองแนบไฟล์ใหม่อีกครั้ง...", "warning")
+            await asyncio.sleep(1)
+            await _attach_file(page, img_path, on_log)
+        await asyncio.sleep(1)
 
         # baseline หลังแนบรูป (รวมรูปที่เราอัปโหลด) ก่อนกดส่ง
         baseline = await _snapshot_srcs(page)
@@ -301,11 +380,37 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         await asyncio.sleep(1)
         ok = await _download_image(page, info, out_path, on_log)
         if ok:
+            _upscale_to_match(out_path, img_path, on_log)
             on_log(f"    • บันทึก: {os.path.basename(out_path)}", "success")
             return True, "", False
         return False, "ดาวน์โหลดรูปไม่สำเร็จ", False
     except Exception as e:
         return False, str(e), False
+
+
+def _upscale_to_match(out_path, original_path, on_log):
+    """ขยายรูป AI ให้ด้านยาวเท่าต้นฉบับ (Lanczos) เพื่อให้ขนาดไม่เล็กกว่าเดิม"""
+    try:
+        from PIL import Image
+        with Image.open(original_path) as orig:
+            ow, oh = orig.size
+        with Image.open(out_path) as ai:
+            ai.load()
+            aw, ah = ai.size
+            target = max(ow, oh)
+            cur = max(aw, ah)
+            if cur >= target:
+                return  # ใหญ่พอแล้ว
+            scale = target / cur
+            new_size = (round(aw * scale), round(ah * scale))
+            up = ai.resize(new_size, Image.Resampling.LANCZOS)
+        if out_path.lower().endswith((".jpg", ".jpeg")):
+            up.save(out_path, "JPEG", quality=95, optimize=True)
+        else:
+            up.save(out_path)
+        on_log(f"    • ขยายเป็น {new_size[0]}x{new_size[1]} ให้เท่าต้นฉบับ", "info")
+    except Exception as e:
+        on_log(f"    • ขยายรูปไม่สำเร็จ (ใช้ขนาดเดิม): {e}", "info")
 
 
 def _default_profile_dir():
@@ -378,13 +483,16 @@ async def _acquire_page(p, on_log, profile_dir=None):
     return page, cleanup
 
 
-async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None, profile_dir=None):
+async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None,
+                      profile_dir=None, on_progress=None):
     if on_log is None:
         on_log = lambda m, l="info": None
     if on_result is None:
         on_result = lambda f, s, e="": None
     if should_cancel is None:
         should_cancel = lambda: False
+    if on_progress is None:
+        on_progress = lambda c, t: None
 
     try:
         from playwright.async_api import async_playwright
@@ -393,7 +501,11 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
         return
 
     async with async_playwright() as p:
-        page, cleanup = await _acquire_page(p, on_log, profile_dir)
+        try:
+            page, cleanup = await _acquire_page(p, on_log, profile_dir)
+        except Exception as e:
+            on_log(f"เปิดเบราว์เซอร์ไม่ได้: {e}", "error")
+            return
 
         total = sum(len(v["files"]) for v in tasks.values())
         done = 0
@@ -409,14 +521,29 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
                     stopped = True
                     break
                 done += 1
+                on_progress(done, total)
                 img_path = os.path.join(folder_path, filename)
                 name, ext = os.path.splitext(filename)
                 out_path = os.path.join(folder_path, f"{name}_AI{ext}")
+                started = time.time()
                 on_log(f"[{done}/{total}] กำลังทำ: {filename} ใน {folder_name}")
+
+                # ลองทำ + retry 1 ครั้งถ้า fail (ไม่ใช่ลิมิต)
                 ok, err, is_limit = await _retouch_one(page, img_path, out_path, custom_gpt_url, on_log)
+                if (not ok) and (not is_limit) and (not should_cancel()):
+                    on_log("    ↻ ลองใหม่อีกครั้ง (รอบที่ 2)...", "warning")
+                    try:
+                        await page.reload(wait_until="domcontentloaded", timeout=30000)
+                        await asyncio.sleep(2)
+                    except Exception:
+                        pass
+                    ok, err, is_limit = await _retouch_one(page, img_path, out_path, custom_gpt_url, on_log)
+
                 on_result(filename, ok, err)
+                if ok:
+                    on_log(f"    • ใช้เวลา {time.time() - started:.0f}s", "info")
                 if is_limit:
-                    on_log("⛔ ติดลิมิตการใช้งาน ChatGPT — หยุดการทำงานทั้งหมด รูปที่เหลือยังไม่ถูกทำ", "error")
+                    on_log("⛔ ติดลิมิต/ล็อกอินมีปัญหา — หยุดทั้งหมด รูปที่เหลือยังไม่ถูกทำ", "error")
                     hit_limit = True
                     stopped = True
                     break
@@ -426,13 +553,14 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
 
         await cleanup()
     if hit_limit:
-        on_log("หยุดเพราะติดลิมิต — ลองใหม่ภายหลังเมื่อโควต้ารีเซ็ต", "warning")
+        on_log("หยุดเพราะติดลิมิต/ล็อกอิน — ลองใหม่ภายหลัง", "warning")
     elif not should_cancel():
         on_log("ChatGPT retouching complete.", "success")
 
 
-def run_retouch_blocking(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None, profile_dir=None):
-    asyncio.run(run_retouch(tasks, custom_gpt_url, on_log, on_result, should_cancel, profile_dir))
+def run_retouch_blocking(tasks, custom_gpt_url="", on_log=None, on_result=None, should_cancel=None,
+                         profile_dir=None, on_progress=None):
+    asyncio.run(run_retouch(tasks, custom_gpt_url, on_log, on_result, should_cancel, profile_dir, on_progress))
 
 
 # ============================ DEBUG / INSPECT MODE ============================

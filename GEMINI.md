@@ -3,13 +3,13 @@
 โปรเจคนี้เป็นเครื่องมือเตรียมรูปสินค้า (Retouching & Organizing) สำหรับ Kh Creation โดยใช้เทคโนโลยี Cloud AI และระบบจัดการไฟล์อัตโนมัติ
 
 ## 🏗 Architectural Overview
-- **Version:** v2.2 Beta 1 (Wizard UI + ChatGPT Edition)
-- **Primary AI Agent:** ChatGPT Custom GPT ผ่าน browser automation (Playwright) — ไฟล์ `chatgpt_retouch.py`
-  - **เลิกใช้ Gemini API แล้ว** เนื่องจาก free tier ของ `gemini-2.5-flash-image` มีโควต้า = 0 (ต้องเปิด billing)
-- **GUI:** Tkinter — Wizard/Stepper (แถบขั้นตอน 0→1→1.5→1.6→1.7→2→3→4 + พื้นที่ทำงานทีละขั้น + log)
+- **Version:** v2.3 Beta 1 (Lightroom UI + Modular + ChatGPT Edition)
+- **Primary AI Agent:** ChatGPT ผ่าน browser automation (Playwright) — ไฟล์ `chatgpt_retouch.py` (เลิกใช้ Gemini API)
+- **GUI:** Tkinter — Lightroom 3 คอลัมน์ (ซ้าย=STEPS, กลาง=พื้นที่ทำงาน, ขวา=panel) + footer progress/log + เลือกธีม/สี
+- **โครงสร้างโมดูล (แยกไฟล์):** `pixup.py` (UI/หลัก) · `theme.py` (ธีม) · `config.py` (settings/manifest) · `dialogs.py` (หน้าต่างย่อย) · `workflow.py` (ตรรกะขั้นตอน) · `chatgpt_retouch.py` (AI)
+- **ลำดับขั้นใหม่:** 1.นำเข้า(รวมจัดกลุ่ม) → 2.รวมรูป → 3.ครอป → 4.AI → 5.เปลี่ยนชื่อ → 6.เก็บเข้าฐาน → 7.คลัง; "จัดกลุ่มตามรหัส" อยู่เมนู Tools
 - **Libraries:** `pillow`, `tkinterdnd2`, `playwright`
-- **Deployment Strategy:** Unified Release (Single Commit) via GitHub Actions
-  - ⚠️ exe ที่ build ต้องมี `chatgpt_retouch.py` ติดไปด้วย และเครื่องปลายทางต้องมี Playwright + Chromium (`playwright install chromium`)
+- **Deployment:** GitHub Actions — PyInstaller `--onefile pixup.py` (จะ bundle theme/config/dialogs/workflow/chatgpt_retouch อัตโนมัติจาก import); เครื่องปลายทางต้องมี Playwright + Chromium สำหรับขั้น AI
 
 ## 🎯 AI Retouching Standards (Critical Checklist)
 ทุกการประมวลผลผ่าน AI Agent ต้องเป็นไปตามกฎเหล็กของ Kh Creation ดังนี้:

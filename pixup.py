@@ -1,7 +1,7 @@
 import sys
 import os
 
-# --- CRITICAL FIX: Standardize Output for Windows No-Console Mode ---
+# --- Standardize output for Windows no-console mode ---
 class NullWriter:
     def write(self, s): pass
     def flush(self): pass
@@ -9,226 +9,187 @@ class NullWriter:
 if sys.stdout is None: sys.stdout = NullWriter()
 if sys.stderr is None: sys.stderr = NullWriter()
 
-import re
-import shutil
-import json
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk, colorchooser
 from datetime import datetime
-from PIL import Image, ImageTk
 
-IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
-VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
+import config
+import theme as theme_mod
+import workflow
+import dialogs
 
-# Drag and Drop support
+# Drag & drop (optional)
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
     HAS_DND = True
 except ImportError:
     HAS_DND = False
 
-# ChatGPT retouch module (in-process; Playwright imported lazily inside the module).
-# Top-level import so PyInstaller bundles it into the frozen exe.
-try:
-    import chatgpt_retouch
-    HAS_CHATGPT = True
-except Exception:
-    HAS_CHATGPT = False
+IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
+
+VERSION = "2.3 Beta 1"
 
 
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.2 Beta 7"
+        # literal เพื่อให้ .github/workflows/build.yml grep เวอร์ชันได้ (อย่าเปลี่ยนเป็นตัวแปร)
+        self.version = "2.3 Beta 1"
         self.root.title(f"PixUp v{self.version}")
-        self.root.geometry("1240x960")
+        self.root.geometry("1320x900")
+        self.root.minsize(1100, 720)
 
-        # Memory for AI retouch tasks: folder_path -> {"files": [...], "is_earring": bool}
-        self.ai_tasks = {}
-
-        # Centralized Error Codes
         self.error_codes = {
-            "E001": "เส้นทางที่ระบุไม่ถูกต้องหรือหาไม่พบ (Path Not Found)",
-            "E002": "ไม่พบไฟล์รูปภาพในโฟลเดอร์ต้นทาง (File Not Found)",
+            "E001": "เส้นทางไม่ถูกต้องหรือหาไม่พบ (Path Not Found)",
+            "E002": "ไม่พบไฟล์รูปภาพในต้นทาง (File Not Found)",
             "E003": "ไม่มีสิทธิ์เข้าถึงไฟล์ (Permission Denied)",
             "E005": "ไดรฟ์ปลายทางไม่ได้เชื่อมต่อ (Drive Offline)",
-            "E007": "เกิดปัญหาขณะก๊อปปี้ไฟล์",
+            "E007": "เกิดปัญหาขณะคัดลอก/ย้ายไฟล์",
             "E999": "เกิดข้อผิดพลาดภายในระบบ",
         }
 
-        # Config & memory files
-        self.config_dir = os.path.join(os.path.expanduser("~"), ".pixup")
-        if not os.path.exists(self.config_dir):
-            os.makedirs(self.config_dir)
-        self.config_file = os.path.join(self.config_dir, "config_v2_1.json")
-        self.history_log = os.path.join(self.config_dir, "history_log.txt")
-        self.manifest_file = os.path.join(self.config_dir, "imported_manifest.json")
-
-        # Variables
+        # โหลดการตั้งค่า
+        self.settings = config.load_settings()
         self.source_dir = tk.StringVar()
-        self.photo1_dir = tk.StringVar()
-        self.photo2_dir = tk.StringVar()
-        self.archive_dir = tk.StringVar()
-        self.camera_source = tk.StringVar()
-        self.chatgpt_url = tk.StringVar()
-        self.chrome_profile_dir = tk.StringVar()
-        self.type_mapping = {}
+        self.photo1_dir = tk.StringVar(value=self.settings.get("photo1", ""))
+        self.photo2_dir = tk.StringVar(value=self.settings.get("photo2", ""))
+        self.archive_dir = tk.StringVar(value=self.settings.get("archive", ""))
+        self.camera_source = tk.StringVar(value=self.settings.get("camera_source", ""))
+        self.chatgpt_url = tk.StringVar(value=self.settings.get("chatgpt_url", ""))
+        self.chrome_profile_dir = tk.StringVar(value=self.settings.get("chrome_profile_dir", ""))
+        self.type_mapping = dict(self.settings.get("types", config.DEFAULT_TYPES))
 
-        # Running state per phase (drives stepper spinner)
-        self.is_running = {
-            "phase0": False, "phase1": False, "phase1_5": False,
-            "phase1_6": False, "phase1_7": False, "phase2": False,
-            "phase3": False, "phase4": False,
-        }
+        # ธีม
+        self.theme_name = self.settings.get("theme", theme_mod.DEFAULT_THEME)
+        self.accent = self.settings.get("accent", theme_mod.DEFAULT_ACCENT)
+        self.colors = theme_mod.build_palette(self.theme_name, self.accent)
+
+        # state
+        self.ai_tasks = {}
+        self.ai_cancel_event = threading.Event()
+        self.is_running = {}
+        self.completed_steps = set()
+        self.current_step = "import"
         self.anim_chars = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
         self.anim_idx = 0
-
-        # Modern dark palette
-        self.colors = {
-            "bg": "#0b0b10", "bg_alt": "#12121a", "card": "#191922", "card_hi": "#21212c",
-            "border": "#2b2b3a", "accent": "#00d1b2", "accent_hi": "#00f2d3",
-            "accent_hover": "#00f2d3", "accent_dim": "#0c7d6e",
-            "text": "#f4f5f7", "text_dim": "#9aa0ab", "text_mute": "#5a6070",
-            "btn_default": "#23232f", "btn_hover": "#2f2f3d",
-            "success": "#2ee6a6", "error": "#ff4d6d", "warning": "#ffd166",
-            "highlight": "#5b8def", "purple": "#a779ff", "orange": "#ff9f43",
-        }
-
-        # Workflow definition — single source of truth for stepper + content
-        self.steps = [
-            {"id": "0", "key": "phase0", "emoji": "📥", "title": "นำเข้ารูปใหม่", "subtitle": "Import New",
-             "desc": "ดึงรูปใหม่จากโฟลเดอร์กล้องอัตโนมัติ (จำไฟล์ที่เคยดึงไปแล้ว จะไม่ดึงซ้ำ) แล้วคัดลอกแยกตามรหัส 4 หลักเข้าสู่ Workspace โดยไม่ลบต้นฉบับ",
-             "btn": "📥  นำเข้ารูปใหม่", "action": self.run_phase_0_import, "color": "accent", "beta": True},
-            {"id": "1", "key": "phase1", "emoji": "🗂", "title": "จัดกลุ่มตามรหัส", "subtitle": "Group by Code",
-             "desc": "แยกรูปที่อยู่ใน Workspace เข้ากลุ่มโฟลเดอร์ตามรหัส 4 หลักที่พบในชื่อไฟล์",
-             "btn": "🗂  จัดกลุ่มตามรหัส", "action": self.run_phase_1, "color": "highlight"},
-            {"id": "1.5", "key": "phase1_5", "emoji": "🤖", "title": "รีทัชด้วย AI", "subtitle": "AI Retouch · ChatGPT",
-             "desc": "เลือกรูป (สูงสุด 2 รูป/โฟลเดอร์) แล้วส่งเข้า ChatGPT รีทัชอัตโนมัติผ่านเบราว์เซอร์ และดาวน์โหลดผลกลับมาเป็นไฟล์ _AI",
-             "btn": "🤖  เริ่มรีทัช AI", "action": self.run_phase_ai_retouch, "color": "highlight"},
-            {"id": "1.6", "key": "phase1_6", "emoji": "🔗", "title": "รวมรูปต่างหู", "subtitle": "Merge",
-             "desc": "เลือก 2 รูปต่อโฟลเดอร์ (หน้า/ข้าง) แล้วเข้าหน้าจัดวาง ปรับขนาด/สลับ/บันทึก เป็นภาพเดียวบนพื้นหลังขาว",
-             "btn": "🔗  เลือกรูปแล้วรวม", "action": self.run_phase_merge, "color": "purple"},
-            {"id": "1.7", "key": "phase1_7", "emoji": "✂️", "title": "ครอบตัดรูป", "subtitle": "Crop",
-             "desc": "เลือกรูปที่ต้องการครอบตัด (เลือกได้หลายรูป) แล้วระบบจะดึงมาให้ปรับ zoom/ตำแหน่ง ทีละรูป",
-             "btn": "✂️  เลือกรูปแล้วครอบตัด", "action": self.run_phase_crop, "color": "orange"},
-            {"id": "2", "key": "phase2", "emoji": "🏷", "title": "เปลี่ยนชื่อ + เลือกรูปหลัก", "subtitle": "Rename & Primary",
-             "desc": "เลือกรูปหลักของแต่ละชุด แล้วเปลี่ยนชื่อไฟล์ทั้งหมดตามรหัสโฟลเดอร์ (รูปหลัก = รหัส, รูปอื่น = รหัส-2, -3 ...)",
-             "btn": "🏷  เปลี่ยนชื่อ & เลือกรูปหลัก", "action": self.run_phase_rename, "color": "highlight"},
-            {"id": "3", "key": "phase3", "emoji": "💾", "title": "เก็บเข้าฐานข้อมูล", "subtitle": "Collect to DB",
-             "desc": "ก๊อปปี้ไฟล์ที่ตั้งชื่อแล้วไปยัง Photo 1 (Main) และ Photo 2 (Backup) พร้อมกัน จัดวางตามหมวดหมู่และช่วงรหัส",
-             "btn": "💾  เก็บเข้าฐานข้อมูล", "action": self.run_phase_backup, "color": "highlight"},
-            {"id": "4", "key": "phase4", "emoji": "📦", "title": "ย้ายเข้าคลัง", "subtitle": "Archive",
-             "desc": "ย้ายโฟลเดอร์ทั้งหมดใน Workspace เข้าคลังเก็บประวัติ จัดเรียงตามปี/เดือน/วันที่",
-             "btn": "📦  ย้ายเข้าคลัง", "action": self.run_phase_archive, "color": "highlight"},
-        ]
-        self.step_widgets = {}
-        self.current_step = "0"
-        self.completed_steps = set()
+        self.count_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="")
-        self.ai_btn = None
-        self.ai_btn_default_text = "🤖  เริ่มรีทัช AI"
-        self.ai_cancel_event = threading.Event()
         self.log_visible = True
+        self.ai_btn = None
 
-        self.load_settings()
-        self.create_widgets()
+        # นิยามขั้นตอน (ลำดับใหม่)
+        self.steps = [
+            {"id": "import", "no": "1", "emoji": "📥", "title": "นำเข้ารูปใหม่", "sub": "Import",
+             "desc": "ดึงรูป/วิดีโอใหม่จากโฟลเดอร์กล้องอัตโนมัติ (เลือกโหมดได้) แล้วคัดลอกแยกตามรหัส 4 หลัก โดยไม่ลบต้นฉบับ",
+             "action": lambda: workflow.phase_import(self), "color": "accent"},
+            {"id": "merge", "no": "2", "emoji": "🔗", "title": "รวมรูปต่างหู", "sub": "Merge",
+             "desc": "เลือก 2 รูป/โฟลเดอร์ (หน้า/ข้าง) รวมเป็นรูปเดียวก่อน เพื่อส่งเข้า AI แค่รูปเดียว (ประหยัดโควต้า)",
+             "action": lambda: workflow.phase_merge(self), "color": "purple"},
+            {"id": "crop", "no": "3", "emoji": "✂️", "title": "ครอบตัด", "sub": "Crop",
+             "desc": "เลือกรูปแล้วครอบตัด/จัดตำแหน่งก่อนส่ง AI จะได้รีทัชเฉพาะส่วนที่จำเป็น",
+             "action": lambda: workflow.phase_crop(self), "color": "orange"},
+            {"id": "ai", "no": "4", "emoji": "🤖", "title": "รีทัชด้วย AI", "sub": "AI Retouch",
+             "desc": "เลือกรูป (ที่รวม/ครอปแล้ว) ส่งเข้า ChatGPT รีทัชอัตโนมัติ ดาวน์โหลดกลับเป็นไฟล์ _AI และขยายเท่าต้นฉบับ",
+             "action": lambda: workflow.phase_ai(self), "color": "highlight"},
+            {"id": "rename", "no": "5", "emoji": "🏷", "title": "เปลี่ยนชื่อ + เลือกรูปหลัก", "sub": "Rename",
+             "desc": "เลือกรูปหลัก (ไฮไลต์รูป AI) แล้วเปลี่ยนชื่อไฟล์ทั้งหมดตามรหัสโฟลเดอร์ (รวมวิดีโอ)",
+             "action": lambda: workflow.phase_rename(self), "color": "highlight"},
+            {"id": "collect", "no": "6", "emoji": "💾", "title": "เก็บเข้าฐานข้อมูล", "sub": "Collect",
+             "desc": "พรีวิวรูปหลัก + ปลายทาง แล้วคัดลอกเฉพาะรูปหลักไป Photo 1/Photo 2 (ไม่สร้างโฟลเดอร์มั่ว)",
+             "action": lambda: workflow.phase_collect(self), "color": "highlight"},
+            {"id": "archive", "no": "7", "emoji": "📦", "title": "ย้ายเข้าคลัง", "sub": "Archive",
+             "desc": "ย้ายทุกโฟลเดอร์ใน Workspace เข้าคลังเก็บประวัติ จัดเรียงตามปี/เดือน/วัน",
+             "action": lambda: workflow.phase_archive(self), "color": "highlight"},
+        ]
+        for s in self.steps:
+            self.is_running[s["id"]] = False
+        self.step_widgets = {}
+
+        self.build_ui()
         if HAS_DND:
-            self.setup_dnd()
-        self.root.after(120, self.start_animation_loop)
-        self.root.after(1000, self.auto_detect_downloads)
+            self._setup_dnd()
+        self.root.after(120, self._animation_loop)
+        self.root.after(800, self._auto_detect_downloads)
 
-    # ----------------------------- Settings / Memory -----------------------------
-    def load_settings(self):
-        default_types = {'R': 'Ring', 'N': 'Necklace', 'E': 'Earring', 'P': 'Pendant', 'B': 'Bracelet', 'S': 'Sets'}
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    self.photo1_dir.set(data.get('photo1', ''))
-                    self.photo2_dir.set(data.get('photo2', ''))
-                    self.archive_dir.set(data.get('archive', ''))
-                    self.camera_source.set(data.get('camera_source', ''))
-                    if data.get('chatgpt_url'):
-                        self.chatgpt_url.set(data.get('chatgpt_url'))
-                    self.chrome_profile_dir.set(data.get('chrome_profile_dir', ''))
-                    self.type_mapping = data.get('types', default_types)
-            except Exception as e:
-                self.type_mapping = default_types
-                print(f"Failed to load settings: {e}")
-        else:
-            self.type_mapping = default_types
+    # ===================== persistence wrappers =====================
+    def _gather_settings(self):
+        return {
+            "photo1": self.photo1_dir.get(), "photo2": self.photo2_dir.get(),
+            "archive": self.archive_dir.get(), "camera_source": self.camera_source.get(),
+            "chatgpt_url": self.chatgpt_url.get(), "chrome_profile_dir": self.chrome_profile_dir.get(),
+            "theme": self.theme_name, "accent": self.accent, "types": self.type_mapping,
+        }
 
     def save_settings(self):
-        data = {
-            'photo1': self.photo1_dir.get(), 'photo2': self.photo2_dir.get(),
-            'archive': self.archive_dir.get(), 'camera_source': self.camera_source.get(),
-            'chatgpt_url': self.chatgpt_url.get(), 'chrome_profile_dir': self.chrome_profile_dir.get(),
-            'types': self.type_mapping,
-        }
-        with open(self.config_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
+        config.save_settings(self._gather_settings())
 
     def load_manifest(self):
-        try:
-            if os.path.exists(self.manifest_file):
-                with open(self.manifest_file, 'r', encoding='utf-8') as f:
-                    return set(json.load(f))
-        except Exception as e:
-            print(f"Failed to load manifest: {e}")
-        return set()
+        return config.load_manifest()
 
-    def save_manifest(self, manifest):
-        try:
-            with open(self.manifest_file, 'w', encoding='utf-8') as f:
-                json.dump(sorted(manifest), f, ensure_ascii=False)
-        except Exception as e:
-            self.log_threadsafe(f"บันทึก manifest ไม่สำเร็จ: {e}", "error")
+    def save_manifest(self, m):
+        config.save_manifest(m)
 
-    def reset_manifest(self):
-        if messagebox.askyesno("ยืนยัน", "ล้างความจำการนำเข้าทั้งหมด?\nครั้งหน้าขั้นตอนที่ 0 จะดึงรูปเก่าออกมาใหม่ทั้งหมด"):
-            try:
-                if os.path.exists(self.manifest_file):
-                    os.remove(self.manifest_file)
-                self.log("ล้างความจำการนำเข้าแล้ว", "success")
-            except Exception as e:
-                self.log(f"ล้างความจำไม่สำเร็จ: {e}", "error")
+    # ===================== media helpers =====================
+    def is_image_file(self, f):
+        return f.lower().endswith(IMAGE_EXTENSIONS)
 
-    # ----------------------------- Logging / threadsafe helpers -----------------------------
+    def is_video_file(self, f):
+        return f.lower().endswith(VIDEO_EXTENSIONS)
+
+    def is_media_file(self, f):
+        return self.is_image_file(f) or self.is_video_file(f)
+
+    # ===================== logging =====================
     def log(self, message, category="info", code=None):
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_area.configure(state='normal')
+        ts = datetime.now().strftime("%H:%M:%S")
         tag = "info"; prefix = "• "
         if category == "error":
             tag = "error"; prefix = "✖ "
             if code and code in self.error_codes:
                 message = f"[{code}] {message} -> {self.error_codes[code]}"
-        elif "สำเร็จ" in message or "Success" in message:
+        elif category == "success" or "สำเร็จ" in message:
             tag = "success"; prefix = "✔ "
-        elif "ข้าม" in message or "Skipped" in message:
+        elif category == "warning" or "ข้าม" in message:
             tag = "warning"; prefix = "⚠ "
-        elif "ตรวจพบ" in message or "AI" in message:
+        elif category == "highlight":
             tag = "highlight"; prefix = "✨ "
-
-        msg_line = f"[{timestamp}] {prefix}{message}\n"
-        self.log_area.insert(tk.END, f"[{timestamp}] ", "time")
-        self.log_area.insert(tk.END, f"{prefix}{message}\n", tag)
-        self.log_area.configure(state='disabled'); self.log_area.see(tk.END)
         try:
-            with open(self.history_log, "a", encoding="utf-8") as f:
-                f.write(msg_line)
-        except Exception as e:
-            print(f"Failed to write history log: {e}")
+            self.log_area.configure(state='normal')
+            self.log_area.insert(tk.END, f"[{ts}] ", "time")
+            self.log_area.insert(tk.END, f"{prefix}{message}\n", tag)
+            self.log_area.configure(state='disabled'); self.log_area.see(tk.END)
+        except tk.TclError:
+            pass
+        config.append_history(f"[{ts}] {prefix}{message}\n")
 
     def log_threadsafe(self, message, category="info", code=None):
         self.root.after(0, lambda: self.log(message, category, code))
 
+    def error(self, message, code=None):
+        """แจ้ง error ทั้ง log + messagebox (เรียกจาก main thread)"""
+        self.log(message, "error", code)
+        messagebox.showerror("Error", message if not code else f"[{code}] {message}")
+
+    def confirm(self, title, message):
+        return messagebox.askyesno(title, message)
+
+    # ===================== progress / running state =====================
     def set_progress_threadsafe(self, value, maximum=None):
-        def update():
-            if maximum is not None:
-                self.progress['maximum'] = maximum
-            self.progress['value'] = value
-        self.root.after(0, update)
+        def upd():
+            try:
+                if maximum is not None:
+                    self.progress['maximum'] = maximum if maximum else 100
+                self.progress['value'] = value
+            except tk.TclError:
+                pass
+        self.root.after(0, upd)
+
+    def set_count_threadsafe(self, cur, total):
+        def upd():
+            self.count_var.set(f"กำลังทำ {cur} จาก {total}" if total else "")
+        self.root.after(0, upd)
 
     def set_running(self, phase, running):
         self.root.after(0, lambda: self.is_running.__setitem__(phase, running))
@@ -236,230 +197,315 @@ class PixUpApp:
     def mark_completed(self, step_id):
         self.root.after(0, lambda: self.completed_steps.add(step_id))
 
-    def is_image_file(self, filename):
-        return filename.lower().endswith(IMAGE_EXTENSIONS)
-
-    def is_video_file(self, filename):
-        return filename.lower().endswith(VIDEO_EXTENSIONS)
-
-    def is_media_file(self, filename):
-        return self.is_image_file(filename) or self.is_video_file(filename)
-
-    def current_step_key(self):
-        for s in self.steps:
-            if s["id"] == self.current_step:
-                return s["key"]
-        return ""
-
-    # ----------------------------- Animation -----------------------------
-    def start_animation_loop(self):
-        self.anim_idx = (self.anim_idx + 1) % len(self.anim_chars)
-        spin = self.anim_chars[self.anim_idx]
-        for step in self.steps:
-            key = step["key"]; sid = step["id"]
-            w = self.step_widgets.get(key)
-            if not w:
-                continue
-            badge, name = w["badge"], w["name"]
+    # ===================== AI button state =====================
+    def ai_set_cancel_ui(self):
+        def _do():
             try:
-                if self.is_running.get(key):
-                    badge.config(text=spin, bg=self.colors["accent"], fg="#08120f")
-                    name.config(fg=self.colors["accent"])
-                elif sid in self.completed_steps:
-                    badge.config(text="✓", bg=self.colors["accent_dim"], fg=self.colors["text"])
-                    name.config(fg=self.colors["text_dim"])
-                elif sid == self.current_step:
-                    pulse = self.colors["accent"] if (self.anim_idx // 3) % 2 == 0 else self.colors["accent_hi"]
-                    badge.config(text=sid, bg=pulse, fg="#08120f")
-                    name.config(fg=self.colors["text"])
-                else:
-                    badge.config(text=sid, bg=self.colors["card"], fg=self.colors["text_dim"])
-                    name.config(fg=self.colors["text_mute"])
+                if self.ai_btn and self.ai_btn.winfo_exists():
+                    self.ai_btn.config(text="■ ยกเลิก AI", bg=self.colors["error"], fg="#ffffff",
+                                       command=self.cancel_ai, state="normal")
             except tk.TclError:
                 pass
+        self.root.after(0, _do)
 
-        if self.is_running.get(self.current_step_key(), False):
-            self.status_var.set(f"{spin}  กำลังทำงาน...")
-        else:
-            self.status_var.set("")
-        self.root.after(120, self.start_animation_loop)
+    def ai_restore_ui(self):
+        def _do():
+            try:
+                if self.ai_btn and self.ai_btn.winfo_exists():
+                    st = next(s for s in self.steps if s["id"] == "ai")
+                    self.ai_btn.config(text=f"{st['emoji']}  เริ่ม{st['title']}",
+                                       bg=self.colors[st["color"]], fg=self.colors["on_accent"],
+                                       command=st["action"], state="normal")
+            except (tk.TclError, StopIteration):
+                pass
+        self.root.after(0, _do)
 
-    # ----------------------------- Drag & Drop -----------------------------
-    def setup_dnd(self):
-        self.source_entry.drop_target_register(DND_FILES)
-        self.source_entry.dnd_bind('<<Drop>>', self.handle_drop)
+    def cancel_ai(self):
+        self.ai_cancel_event.set()
+        self.log("กำลังยกเลิก AI... จะหยุดหลังรูปปัจจุบันเสร็จ", "warning")
+        try:
+            if self.ai_btn and self.ai_btn.winfo_exists():
+                self.ai_btn.config(text="⌛ กำลังยกเลิก...", state="disabled")
+        except tk.TclError:
+            pass
 
-    def handle_drop(self, event):
-        path = event.data.strip('{}').strip('"')
-        if os.path.isdir(path):
-            self.source_dir.set(os.path.normpath(path))
-            self.log(f"Drag & Drop: {path}", "success")
-
-    def auto_detect_downloads(self):
-        downloads = os.path.join(os.path.expanduser("~"), "Downloads")
-        if not os.path.exists(downloads):
-            return
-        candidates = [d for d in os.listdir(downloads)
-                      if os.path.isdir(os.path.join(downloads, d)) and d.lower().startswith("media -")]
-        if not candidates:
-            return
-        candidates.sort(key=lambda x: os.path.getctime(os.path.join(downloads, x)), reverse=True)
-        if os.path.join(downloads, candidates[0]) != self.source_dir.get():
-            if messagebox.askyesno("New Workspace", f"ใช้โฟลเดอร์ล่าสุดนี้เป็น Workspace?\n{candidates[0]}"):
-                self.source_dir.set(os.path.join(downloads, candidates[0]))
-
-    # ----------------------------- UI: shell -----------------------------
-    def create_widgets(self):
-        self.root.configure(bg=self.colors["bg"])
+    # ===================== UI build =====================
+    def build_ui(self):
+        c = self.colors
+        self.root.configure(bg=c["bg"])
         style = ttk.Style()
         try:
             style.theme_use('clam')
         except Exception:
             pass
-        style.configure("PixUp.Horizontal.TProgressbar", troughcolor=self.colors["card"],
-                        background=self.colors["accent"], thickness=12, borderwidth=0)
+        style.configure("PixUp.Horizontal.TProgressbar", troughcolor=c["card"],
+                        background=c["accent"], thickness=10, borderwidth=0)
 
-        self.build_header(self.root)
-        self.build_workspace_bar(self.root)
-        self.build_stepper(self.root)
-        # Log bar pinned to bottom (packed before the expanding content so it never gets squeezed)
-        self.build_log(self.root)
-        self.content_frame = tk.Frame(self.root, bg=self.colors["bg"])
-        self.content_frame.pack(fill="both", expand=True)
+        self._build_header()
+        # body: 3 คอลัมน์
+        body = tk.Frame(self.root, bg=c["bg"]); body.pack(fill="both", expand=True)
+        self.left = tk.Frame(body, bg=c["panel"], width=230); self.left.pack(side="left", fill="y")
+        self.left.pack_propagate(False)
+        self.right = tk.Frame(body, bg=c["panel"], width=300); self.right.pack(side="right", fill="y")
+        self.right.pack_propagate(False)
+        self.center = tk.Frame(body, bg=c["bg"]); self.center.pack(side="left", fill="both", expand=True)
+
+        self._build_steps_column()
+        self._build_footer()       # progress + log (อยู่ล่างของ root)
         self.show_step(self.current_step)
 
-    def build_header(self, parent):
-        h = tk.Frame(parent, bg=self.colors["bg_alt"], height=92)
-        h.pack(fill="x"); h.pack_propagate(False)
-        left = tk.Frame(h, bg=self.colors["bg_alt"]); left.pack(side="left", padx=30)
-        tk.Label(left, text="PIXUP", bg=self.colors["bg_alt"], fg=self.colors["accent"],
-                 font=("Segoe UI", 26, "bold")).pack(anchor="w", pady=(18, 0))
-        tk.Label(left, text=f"KH CREATION STUDIO  ·  v{self.version}", bg=self.colors["bg_alt"],
-                 fg=self.colors["text_mute"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        gear = tk.Button(h, text="⚙", command=self.open_settings, bg=self.colors["bg_alt"],
-                         fg=self.colors["text_dim"], relief="flat", font=("Segoe UI", 20),
-                         activebackground=self.colors["bg_alt"], activeforeground=self.colors["accent"],
-                         cursor="hand2")
-        gear.pack(side="right", padx=28)
+    def _build_header(self):
+        c = self.colors
+        h = tk.Frame(self.root, bg=c["bg_alt"], height=70); h.pack(fill="x"); h.pack_propagate(False)
+        tk.Label(h, text="PIXUP", bg=c["bg_alt"], fg=c["accent"],
+                 font=("Segoe UI", 22, "bold")).pack(side="left", padx=(24, 6), pady=14)
+        tk.Label(h, text=f"KH CREATION  ·  v{self.version}", bg=c["bg_alt"], fg=c["text_mute"],
+                 font=("Segoe UI", 8, "bold")).pack(side="left", pady=(26, 0))
 
-    def build_workspace_bar(self, parent):
-        bar = tk.Frame(parent, bg=self.colors["bg"]); bar.pack(fill="x", padx=30, pady=(14, 0))
-        card = tk.Frame(bar, bg=self.colors["card"], padx=16, pady=12,
-                        highlightthickness=1, highlightbackground=self.colors["border"])
-        card.pack(fill="x")
-        tk.Label(card, text="📂 WORKSPACE", bg=self.colors["card"], fg=self.colors["text_dim"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 12))
-        self.source_entry = tk.Entry(card, textvariable=self.source_dir, font=("Consolas", 10),
-                                     bg=self.colors["bg"], fg=self.colors["text"], relief="flat",
-                                     insertbackground="white")
-        self.source_entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 12))
-        tk.Button(card, text="เลือกโฟลเดอร์", command=lambda: self.browse_dir(self.source_dir, False),
-                  bg=self.colors["accent"], fg="#08120f", relief="flat",
-                  font=("Segoe UI", 9, "bold"), cursor="hand2").pack(side="right")
+        tk.Button(h, text="⚙", command=self.open_settings, bg=c["bg_alt"], fg=c["text_dim"],
+                  relief="flat", font=("Segoe UI", 18), activebackground=c["bg_alt"],
+                  activeforeground=c["accent"], cursor="hand2").pack(side="right", padx=(8, 20))
+        tk.Button(h, text="🛠 Tools", command=self.open_tools, bg=c["bg_alt"], fg=c["text_dim"],
+                  relief="flat", font=("Segoe UI", 10), activebackground=c["bg_alt"],
+                  activeforeground=c["accent"], cursor="hand2").pack(side="right", padx=4)
+        # theme selector
+        self.theme_var = tk.StringVar(value=self.theme_name)
+        tm = ttk.Combobox(h, textvariable=self.theme_var, values=list(theme_mod.THEMES.keys()),
+                          width=10, state="readonly")
+        tm.pack(side="right", padx=4, pady=20)
+        tm.bind("<<ComboboxSelected>>", lambda e: self.change_theme(self.theme_var.get()))
+        tk.Button(h, text="● สี", command=self.pick_accent, bg=c["bg_alt"], fg=c["accent"],
+                  relief="flat", font=("Segoe UI", 11, "bold"), activebackground=c["bg_alt"],
+                  cursor="hand2").pack(side="right", padx=4)
 
-    def build_stepper(self, parent):
-        bar = tk.Frame(parent, bg=self.colors["bg_alt"]); bar.pack(fill="x", padx=30, pady=(14, 0))
-        inner = tk.Frame(bar, bg=self.colors["bg_alt"]); inner.pack(fill="x", pady=16)
-        self.step_widgets = {}
-        for i, step in enumerate(self.steps):
-            inner.columnconfigure(i, weight=1, uniform="steps")
-            cell = tk.Frame(inner, bg=self.colors["bg_alt"])
-            cell.grid(row=0, column=i, sticky="nsew")
-            badge = tk.Label(cell, text=step["id"], width=4, height=2, bg=self.colors["card"],
-                             fg=self.colors["text_dim"], font=("Segoe UI", 12, "bold"), cursor="hand2")
-            badge.pack()
-            name = tk.Label(cell, text=step["subtitle"], bg=self.colors["bg_alt"],
-                            fg=self.colors["text_mute"], font=("Segoe UI", 7), cursor="hand2",
-                            wraplength=120, justify="center")
-            name.pack(pady=(5, 0))
-            for wdg in (badge, name):
-                wdg.bind("<Button-1>", lambda e, sid=step["id"]: self.show_step(sid))
-            self.step_widgets[step["key"]] = {"badge": badge, "name": name, "step": step}
+    def _build_steps_column(self):
+        c = self.colors
+        # workspace selector อยู่บนสุดของคอลัมน์ซ้าย
+        ws = tk.Frame(self.left, bg=c["panel"]); ws.pack(fill="x", padx=14, pady=(16, 8))
+        tk.Label(ws, text="WORKSPACE", bg=c["panel"], fg=c["text_mute"],
+                 font=("Segoe UI", 7, "bold")).pack(anchor="w")
+        self.source_entry = tk.Entry(ws, textvariable=self.source_dir, font=("Consolas", 8),
+                                     bg=c["input_bg"], fg=c["text"], relief="flat", insertbackground="white")
+        self.source_entry.pack(fill="x", ipady=4, pady=(4, 4))
+        tk.Button(ws, text="เลือกโฟลเดอร์", command=lambda: self.browse_dir(self.source_dir, False),
+                  bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 8),
+                  cursor="hand2").pack(fill="x")
 
-    def build_content(self, step_id):
-        step = next((s for s in self.steps if s["id"] == step_id), self.steps[0])
-        for w in self.content_frame.winfo_children():
-            w.destroy()
-        self.ai_btn = None
+        tk.Label(self.left, text="STEPS", bg=c["panel"], fg=c["text_mute"],
+                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=16, pady=(10, 4))
+        for s in self.steps:
+            row = tk.Frame(self.left, bg=c["panel"], cursor="hand2")
+            row.pack(fill="x", padx=8, pady=2)
+            badge = tk.Label(row, text=s["no"], width=3, bg=c["card"], fg=c["text_dim"],
+                             font=("Segoe UI", 11, "bold"))
+            badge.pack(side="left", padx=(4, 8), pady=6)
+            txt = tk.Label(row, text=f"{s['emoji']} {s['title']}", bg=c["panel"], fg=c["text_dim"],
+                           font=("Segoe UI", 9), anchor="w", justify="left")
+            txt.pack(side="left", fill="x", expand=True)
+            for w in (row, badge, txt):
+                w.bind("<Button-1>", lambda e, sid=s["id"]: self.show_step(sid))
+            self.step_widgets[s["id"]] = {"row": row, "badge": badge, "txt": txt}
 
-        card = tk.Frame(self.content_frame, bg=self.colors["card"], padx=40, pady=34,
-                        highlightthickness=1, highlightbackground=self.colors["border"])
-        card.pack(fill="both", expand=True, padx=30, pady=18)
-
-        title_row = tk.Frame(card, bg=self.colors["card"]); title_row.pack(fill="x", anchor="w")
-        tk.Label(title_row, text=f"{step['emoji']}  {step['title']}", bg=self.colors["card"],
-                 fg=self.colors["text"], font=("Segoe UI", 20, "bold")).pack(side="left", anchor="w")
-        if step.get("beta"):
-            tk.Label(title_row, text=" BETA ", bg=self.colors["warning"], fg="#1a1a1a",
-                     font=("Segoe UI", 8, "bold")).pack(side="left", padx=10, pady=6)
-        tk.Label(card, text=step["subtitle"].upper(), bg=self.colors["card"],
-                 fg=self.colors.get(step.get("color", "accent")), font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(2, 0))
-        tk.Label(card, text=step["desc"], bg=self.colors["card"], fg=self.colors["text_dim"],
-                 font=("Segoe UI", 11), wraplength=720, justify="left").pack(anchor="w", pady=(18, 0))
-
-        btn = self.create_styled_button(card, step["btn"], step["action"],
-                                        self.colors.get(step.get("color", "accent")), "#08120f")
-        btn.pack(fill="x", pady=(28, 0), ipady=6)
-        if step_id == "1.5":
-            self.ai_btn = btn
-
-        tk.Label(card, textvariable=self.status_var, bg=self.colors["card"], fg=self.colors["accent"],
-                 font=("Consolas", 12, "bold")).pack(anchor="w", pady=(16, 0))
-
-        nav = tk.Frame(card, bg=self.colors["card"]); nav.pack(fill="x", side="bottom", pady=(20, 0))
-        ids = [s["id"] for s in self.steps]
-        idx = ids.index(step_id)
-        if idx > 0:
-            tk.Button(nav, text="‹ ก่อนหน้า", command=lambda: self.show_step(ids[idx - 1]),
-                      bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
-                      font=("Segoe UI", 9), cursor="hand2", padx=10, pady=4).pack(side="left")
-        if idx < len(ids) - 1:
-            tk.Button(nav, text="ถัดไป ›", command=lambda: self.show_step(ids[idx + 1]),
-                      bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
-                      font=("Segoe UI", 9), cursor="hand2", padx=10, pady=4).pack(side="right")
-
-    def show_step(self, step_id):
-        self.current_step = step_id
-        self.build_content(step_id)
-
-    def build_log(self, parent):
-        wrap = tk.Frame(parent, bg=self.colors["bg"]); wrap.pack(side="bottom", fill="x", padx=30, pady=(0, 16))
-        self.progress = ttk.Progressbar(wrap, orient="horizontal", mode="determinate",
+    def _build_footer(self):
+        c = self.colors
+        wrap = tk.Frame(self.root, bg=c["bg"]); wrap.pack(side="bottom", fill="x")
+        prow = tk.Frame(wrap, bg=c["bg"]); prow.pack(fill="x", padx=16, pady=(6, 2))
+        self.progress = ttk.Progressbar(prow, orient="horizontal", mode="determinate",
                                         style="PixUp.Horizontal.TProgressbar")
-        self.progress.pack(fill="x", pady=(0, 8))
-        head = tk.Frame(wrap, bg=self.colors["bg"]); head.pack(fill="x")
-        tk.Label(head, text="ACTIVITY LOG", bg=self.colors["bg"], fg=self.colors["text_dim"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left")
-        self.log_toggle_btn = tk.Button(head, text="▾ ซ่อน", command=self.toggle_log,
-                                        bg=self.colors["bg"], fg=self.colors["text_dim"], relief="flat",
-                                        font=("Segoe UI", 8), cursor="hand2", activebackground=self.colors["bg"])
-        self.log_toggle_btn.pack(side="right")
-        self.log_area = scrolledtext.ScrolledText(wrap, height=9, bg="#08080c", fg="#bbb",
-                                                  font=("Consolas", 9), relief="flat", padx=14, pady=10)
-        self.log_area.pack(fill="both", expand=True, pady=(6, 0))
-        self.log_area.tag_config("time", foreground="#444")
-        self.log_area.tag_config("success", foreground=self.colors["success"])
-        self.log_area.tag_config("error", foreground=self.colors["error"])
-        self.log_area.tag_config("warning", foreground=self.colors["warning"])
-        self.log_area.tag_config("highlight", foreground=self.colors["highlight"])
-        self.log_area.tag_config("info", foreground="#dddddd")
+        self.progress.pack(side="left", fill="x", expand=True)
+        tk.Label(prow, textvariable=self.count_var, bg=c["bg"], fg=c["accent"],
+                 font=("Segoe UI", 9, "bold"), width=20, anchor="e").pack(side="right", padx=(8, 0))
+
+        head = tk.Frame(wrap, bg=c["bg"]); head.pack(fill="x", padx=16)
+        tk.Label(head, text="ACTIVITY LOG", bg=c["bg"], fg=c["text_mute"],
+                 font=("Segoe UI", 7, "bold")).pack(side="left")
+        self.log_toggle = tk.Button(head, text="▾ ซ่อน", command=self.toggle_log, bg=c["bg"],
+                                    fg=c["text_dim"], relief="flat", font=("Segoe UI", 8),
+                                    cursor="hand2", activebackground=c["bg"])
+        self.log_toggle.pack(side="right")
+        self.log_area = scrolledtext.ScrolledText(wrap, height=8, bg=c["input_bg"], fg=c["text_dim"],
+                                                  font=("Consolas", 9), relief="flat", padx=12, pady=8)
+        self.log_area.pack(fill="x", padx=16, pady=(4, 10))
+        self.log_area.tag_config("time", foreground=c["text_mute"])
+        self.log_area.tag_config("success", foreground=c["success"])
+        self.log_area.tag_config("error", foreground=c["error"])
+        self.log_area.tag_config("warning", foreground=c["warning"])
+        self.log_area.tag_config("highlight", foreground=c["highlight"])
+        self.log_area.tag_config("info", foreground=c["text"])
         self.log_area.configure(state='disabled')
 
     def toggle_log(self):
         if self.log_visible:
-            self.log_area.pack_forget()
-            self.log_toggle_btn.config(text="▸ แสดง")
+            self.log_area.pack_forget(); self.log_toggle.config(text="▸ แสดง")
         else:
-            self.log_area.pack(fill="both", expand=True, pady=(6, 0))
-            self.log_toggle_btn.config(text="▾ ซ่อน")
+            self.log_area.pack(fill="x", padx=16, pady=(4, 10)); self.log_toggle.config(text="▾ ซ่อน")
         self.log_visible = not self.log_visible
 
-    def create_styled_button(self, parent, text, cmd, bg, fg):
+    # ===================== step navigation (กดครั้งเดียว = ทำงาน) =====================
+    def show_step(self, step_id):
+        self.current_step = step_id
+        self._render_steps_state()
+        self._render_center(step_id)
+        self._render_panel(step_id)
+
+    def _render_steps_state(self):
+        c = self.colors
+        for s in self.steps:
+            w = self.step_widgets.get(s["id"])
+            if not w:
+                continue
+            active = (s["id"] == self.current_step)
+            done = (s["id"] in self.completed_steps)
+            w["row"].config(bg=c["card_hi"] if active else c["panel"])
+            w["txt"].config(bg=c["card_hi"] if active else c["panel"],
+                            fg=c["text"] if active else c["text_dim"])
+            if done:
+                w["badge"].config(text="✓", bg=c["accent_dim"], fg=c["text"])
+            else:
+                w["badge"].config(text=s["no"], bg=c["accent"] if active else c["card"],
+                                  fg=c["on_accent"] if active else c["text_dim"])
+
+    def _render_center(self, step_id):
+        c = self.colors
+        for w in self.center.winfo_children():
+            w.destroy()
+        s = next(x for x in self.steps if x["id"] == step_id)
+        card = tk.Frame(self.center, bg=c["card"], padx=40, pady=34,
+                        highlightthickness=1, highlightbackground=c["border"])
+        card.pack(fill="both", expand=True, padx=24, pady=20)
+        tk.Label(card, text=f"{s['emoji']}  ขั้นที่ {s['no']}", bg=c["card"], fg=c[s["color"]],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        tk.Label(card, text=s["title"], bg=c["card"], fg=c["text"],
+                 font=("Segoe UI", 22, "bold")).pack(anchor="w", pady=(2, 0))
+        tk.Label(card, text=s["desc"], bg=c["card"], fg=c["text_dim"], font=("Segoe UI", 11),
+                 wraplength=620, justify="left").pack(anchor="w", pady=(14, 0))
+
+        btn = self._styled_button(card, f"{s['emoji']}  เริ่ม{s['title']}", s["action"],
+                                  c[s["color"]], c["on_accent"])
+        btn.pack(fill="x", pady=(28, 0), ipady=6)
+        if step_id == "ai":
+            self.ai_btn = btn
+
+        tk.Label(card, textvariable=self.status_var, bg=c["card"], fg=c["accent"],
+                 font=("Consolas", 11, "bold")).pack(anchor="w", pady=(14, 0))
+
+        nav = tk.Frame(card, bg=c["card"]); nav.pack(side="bottom", fill="x", pady=(18, 0))
+        ids = [x["id"] for x in self.steps]; i = ids.index(step_id)
+        if i > 0:
+            tk.Button(nav, text="‹ ก่อนหน้า", command=lambda: self.show_step(ids[i - 1]),
+                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
+                      cursor="hand2", padx=10, pady=4).pack(side="left")
+        if i < len(ids) - 1:
+            tk.Button(nav, text="ถัดไป ›", command=lambda: self.show_step(ids[i + 1]),
+                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
+                      cursor="hand2", padx=10, pady=4).pack(side="right")
+
+    def _render_panel(self, step_id):
+        c = self.colors
+        for w in self.right.winfo_children():
+            w.destroy()
+        tk.Label(self.right, text="ตัวเลือก", bg=c["panel"], fg=c["text_mute"],
+                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=16, pady=(16, 6))
+
+        def panel_card(title):
+            f = tk.Frame(self.right, bg=c["card"], padx=12, pady=10,
+                         highlightthickness=1, highlightbackground=c["border"])
+            f.pack(fill="x", padx=12, pady=6)
+            tk.Label(f, text=title, bg=c["card"], fg=c["text_dim"],
+                     font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            return f
+
+        # ปุ่มเปิดโฟลเดอร์ที่เกี่ยวข้อง
+        f = panel_card("เปิดโฟลเดอร์")
+        tk.Button(f, text="📂 เปิด Workspace", command=lambda: self.open_folder(self.source_dir.get()),
+                  bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
+                  cursor="hand2").pack(fill="x", pady=(6, 2))
+        if step_id == "import":
+            tk.Button(f, text="📷 เปิดโฟลเดอร์กล้อง", command=lambda: self.open_folder(self.camera_source.get()),
+                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
+                      cursor="hand2").pack(fill="x", pady=2)
+        if step_id in ("collect",):
+            tk.Button(f, text="🗄 เปิด Photo 1", command=lambda: self.open_folder(self.photo1_dir.get()),
+                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
+                      cursor="hand2").pack(fill="x", pady=2)
+
+        info = panel_card("คำแนะนำ")
+        tips = {
+            "import": "ตั้งโฟลเดอร์กล้องในหน้า ⚙ ก่อน • โหมด 'ดึงเฉพาะใหม่' จะไม่ดึงซ้ำ",
+            "merge": "เลือก 2 รูปต่อโฟลเดอร์ • ลาก/ซูมในกรอบ • ส่วนเกินกรอบถูกครอป",
+            "crop": "เลือกได้หลายรูป • ลากเพื่อย้าย ล้อเมาส์เพื่อซูม",
+            "ai": "ควรรวม/ครอปก่อน • ล็อกอิน ChatGPT ครั้งเดียว • กดปุ่มอีกครั้งเพื่อยกเลิกระหว่างทำ",
+            "rename": "รูปกรอบเขียว = ผ่าน AI แล้ว แนะนำเลือกเป็นรูปหลัก",
+            "collect": "พรีวิวก่อนคัดลอก • ไม่พบหมวด=ข้าม • ติ๊กอนุญาตถ้าต้องสร้างช่วงใหม่",
+            "archive": "ย้าย (ไม่ใช่คัดลอก) ทุกโฟลเดอร์เข้าคลังตามวันที่",
+        }
+        tk.Label(info, text=tips.get(step_id, ""), bg=c["card"], fg=c["text_dim"],
+                 font=("Segoe UI", 9), wraplength=250, justify="left").pack(anchor="w", pady=(6, 0))
+
+    def _styled_button(self, parent, text, cmd, bg, fg):
         b = tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, font=("Segoe UI", 11, "bold"),
                       relief="flat", height=2, cursor="hand2", activebackground=self.colors["btn_hover"])
         b.bind("<Enter>", lambda e: b.config(bg=self.colors["accent_hover"] if bg == self.colors["accent"] else self.colors["btn_hover"]))
         b.bind("<Leave>", lambda e: b.config(bg=bg))
         return b
+
+    # ===================== theme switching =====================
+    def change_theme(self, name):
+        self.theme_name = name
+        self.colors = theme_mod.build_palette(self.theme_name, self.accent)
+        self.save_settings()
+        self._rebuild_ui()
+
+    def pick_accent(self):
+        rgb, hx = colorchooser.askcolor(color=self.accent, title="เลือกสี Accent")
+        if hx:
+            self.accent = hx
+            self.colors = theme_mod.build_palette(self.theme_name, self.accent)
+            self.save_settings()
+            self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        for w in self.root.winfo_children():
+            w.destroy()
+        self.step_widgets = {}
+        self.build_ui()
+        self.log("เปลี่ยนธีม/สีแล้ว", "success")
+
+    # ===================== animation =====================
+    def _animation_loop(self):
+        self.anim_idx = (self.anim_idx + 1) % len(self.anim_chars)
+        spin = self.anim_chars[self.anim_idx]
+        running_now = False
+        for s in self.steps:
+            w = self.step_widgets.get(s["id"])
+            if not w:
+                continue
+            if self.is_running.get(s["id"]):
+                running_now = True
+                try:
+                    w["badge"].config(text=spin, bg=self.colors["accent"], fg=self.colors["on_accent"])
+                except tk.TclError:
+                    pass
+        if running_now:
+            self.status_var.set(f"{spin}  กำลังทำงาน...")
+        else:
+            self.status_var.set("")
+            self._render_steps_state()
+        self.root.after(120, self._animation_loop)
+
+    # ===================== misc actions =====================
+    def open_folder(self, path):
+        if not path or not os.path.exists(path):
+            self.log("ไม่พบโฟลเดอร์ที่จะเปิด", "warning"); return
+        try:
+            if sys.platform == "darwin":
+                os.system(f'open "{path}"')
+            elif sys.platform.startswith("win"):
+                os.startfile(path)  # noqa
+            else:
+                os.system(f'xdg-open "{path}"')
+        except Exception as e:
+            self.log(f"เปิดโฟลเดอร์ไม่ได้: {e}", "error")
 
     def browse_dir(self, var, is_config):
         d = filedialog.askdirectory()
@@ -468,845 +514,128 @@ class PixUpApp:
         if is_config:
             self.save_settings()
 
-    def add_path_card(self, parent, label, var):
-        c = tk.Frame(parent, bg=self.colors["card"], padx=16, pady=12,
-                     highlightthickness=1, highlightbackground=self.colors["border"])
-        c.pack(fill="x", pady=6)
-        tk.Label(c, text=label, fg=self.colors["text_dim"], bg=self.colors["card"],
-                 font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        row = tk.Frame(c, bg=self.colors["card"]); row.pack(fill="x", pady=(8, 0))
-        tk.Entry(row, textvariable=var, font=("Consolas", 9), bg=self.colors["bg"], fg=self.colors["text"],
-                 relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=6)
-        tk.Button(row, text="...", command=lambda: self.browse_dir(var, True), bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", width=4, cursor="hand2").pack(side="right", padx=(8, 0))
+    def _setup_dnd(self):
+        try:
+            self.source_entry.drop_target_register(DND_FILES)
+            self.source_entry.dnd_bind('<<Drop>>', self._handle_drop)
+        except Exception:
+            pass
 
-    # ----------------------------- Settings window -----------------------------
+    def _handle_drop(self, event):
+        path = event.data.strip('{}').strip('"')
+        if os.path.isdir(path):
+            self.source_dir.set(os.path.normpath(path))
+            self.log(f"Drag & Drop: {path}", "success")
+
+    def _auto_detect_downloads(self):
+        downloads = os.path.join(os.path.expanduser("~"), "Downloads")
+        if not os.path.exists(downloads):
+            return
+        cands = [d for d in os.listdir(downloads)
+                 if os.path.isdir(os.path.join(downloads, d)) and d.lower().startswith("media -")]
+        if not cands:
+            return
+        cands.sort(key=lambda x: os.path.getctime(os.path.join(downloads, x)), reverse=True)
+        latest = os.path.join(downloads, cands[0])
+        if latest != self.source_dir.get():
+            if messagebox.askyesno("New Workspace", f"ใช้โฟลเดอร์ล่าสุดนี้เป็น Workspace?\n{cands[0]}"):
+                self.source_dir.set(latest)
+
+    # ===================== Tools menu =====================
+    def open_tools(self):
+        c = self.colors
+        m = tk.Toplevel(self.root); m.title("Tools"); m.geometry("420x360")
+        m.configure(bg=c["bg"]); m.grab_set()
+        tk.Label(m, text="🛠 เครื่องมือ", bg=c["bg"], fg=c["accent"],
+                 font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(18, 10))
+
+        def tool(text, cmd):
+            self._styled_button(m, text, cmd, c["btn_default"], c["text"]).pack(fill="x", padx=20, pady=5)
+
+        tool("🗂 จัดกลุ่มตามรหัส (ฉุกเฉิน)", lambda: [m.destroy(), workflow.phase_group(self)])
+        tool("🧹 ล้างความจำการนำเข้า", self.reset_import_memory)
+        tool("📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+        tool("📜 เปิดไฟล์ Log", lambda: self.open_folder(config.CONFIG_DIR))
+        tool("🏷 จัดการหมวดหมู่", lambda: [m.destroy(), self.open_category_manager()])
+
+    def reset_import_memory(self):
+        if messagebox.askyesno("ยืนยัน", "ล้างความจำการนำเข้าทั้งหมด?\nครั้งหน้าโหมด 'ดึงเฉพาะใหม่' จะดึงรูปเก่ามาใหม่"):
+            try:
+                config.reset_manifest()
+                self.log("ล้างความจำการนำเข้าแล้ว", "success")
+            except Exception as e:
+                self.log(f"ล้างไม่สำเร็จ: {e}", "error")
+
+    # ===================== settings window =====================
     def open_settings(self):
-        win = tk.Toplevel(self.root)
-        win.title("ตั้งค่า / Settings"); win.geometry("580x760"); win.configure(bg=self.colors["bg"]); win.grab_set()
-        tk.Label(win, text="⚙  SETTINGS", bg=self.colors["bg"], fg=self.colors["accent"],
+        c = self.colors
+        win = tk.Toplevel(self.root); win.title("ตั้งค่า / Settings")
+        win.geometry("600x640"); win.configure(bg=c["bg"]); win.grab_set()
+        tk.Label(win, text="⚙ SETTINGS", bg=c["bg"], fg=c["accent"],
                  font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=24, pady=(20, 10))
-        body = tk.Frame(win, bg=self.colors["bg"]); body.pack(fill="both", expand=True, padx=24)
+        body = tk.Frame(win, bg=c["bg"]); body.pack(fill="both", expand=True, padx=24)
 
-        self.add_path_card(body, "PHOTO 1 — MAIN DATABASE DRIVE", self.photo1_dir)
-        self.add_path_card(body, "PHOTO 2 — BACKUP DATABASE DRIVE", self.photo2_dir)
-        self.add_path_card(body, "ARCHIVE — HISTORY STORAGE", self.archive_dir)
-        self.add_path_card(body, "CAMERA SOURCE — โฟลเดอร์กล้องสำหรับขั้นตอนที่ 0 (เช่น D:/gemlight box)", self.camera_source)
+        self._path_card(body, "PHOTO 1 — MAIN DATABASE", self.photo1_dir)
+        self._path_card(body, "PHOTO 2 — BACKUP DATABASE", self.photo2_dir)
+        self._path_card(body, "ARCHIVE — คลังเก็บประวัติ", self.archive_dir)
+        self._path_card(body, "โฟลเดอร์กล้อง (Camera Source) — สำหรับขั้นนำเข้า", self.camera_source)
+        self._path_card(body, "CHROME PROFILE (ขั้นสูง · เว้นว่าง = โปรไฟล์ PixUp)", self.chrome_profile_dir)
 
-        cg = tk.Frame(body, bg=self.colors["card"], padx=16, pady=12,
-                      highlightthickness=1, highlightbackground=self.colors["border"])
+        cg = tk.Frame(body, bg=c["card"], padx=14, pady=10, highlightthickness=1, highlightbackground=c["border"])
         cg.pack(fill="x", pady=6)
-        tk.Label(cg, text="CHATGPT CUSTOM GPT URL  (เว้นว่าง = ใช้ chatgpt.com ปกติ)", bg=self.colors["card"],
-                 fg=self.colors["highlight"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        tk.Entry(cg, textvariable=self.chatgpt_url, font=("Consolas", 9), bg=self.colors["bg"],
-                 fg=self.colors["text"], relief="flat", insertbackground="white").pack(fill="x", pady=(8, 0), ipady=6)
-
-        self.add_path_card(body, "CHROME PROFILE (ขั้นสูง · เว้นว่าง = โปรไฟล์ของ PixUp ล็อกอินครั้งเดียว)", self.chrome_profile_dir)
-
-        self.create_styled_button(body, "⚙  จัดการหมวดหมู่ (Categories)", self.open_category_manager,
-                                  self.colors["btn_default"], self.colors["text"]).pack(fill="x", pady=(14, 6))
-        self.create_styled_button(body, "🗑  ล้างความจำการนำเข้า (Reset Import Memory)", self.reset_manifest,
-                                  self.colors["btn_default"], self.colors["warning"]).pack(fill="x", pady=6)
+        tk.Label(cg, text="CHATGPT CUSTOM GPT URL (เว้นว่าง = chatgpt.com ปกติ)", bg=c["card"],
+                 fg=c["highlight"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Entry(cg, textvariable=self.chatgpt_url, font=("Consolas", 9), bg=c["input_bg"], fg=c["text"],
+                 relief="flat", insertbackground="white").pack(fill="x", pady=(6, 0), ipady=5)
 
         def save_close():
             self.save_settings(); win.destroy(); self.log("บันทึกการตั้งค่าแล้ว", "success")
-        self.create_styled_button(win, "บันทึก & ปิด", save_close, self.colors["accent"], "#08120f").pack(
-            fill="x", padx=24, pady=18)
+        self._styled_button(win, "บันทึก & ปิด", save_close, c["accent"], c["on_accent"]).pack(
+            fill="x", padx=24, pady=16)
+
+    def _path_card(self, parent, label, var):
+        c = self.colors
+        card = tk.Frame(parent, bg=c["card"], padx=14, pady=10, highlightthickness=1, highlightbackground=c["border"])
+        card.pack(fill="x", pady=5)
+        tk.Label(card, text=label, fg=c["text_dim"], bg=c["card"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        row = tk.Frame(card, bg=c["card"]); row.pack(fill="x", pady=(6, 0))
+        tk.Entry(row, textvariable=var, font=("Consolas", 9), bg=c["input_bg"], fg=c["text"],
+                 relief="flat", insertbackground="white").pack(side="left", expand=True, fill="x", ipady=5)
+        tk.Button(row, text="...", command=lambda: self.browse_dir(var, True), bg=c["btn_default"],
+                  fg=c["text"], relief="flat", width=4, cursor="hand2").pack(side="right", padx=(8, 0))
 
     def open_category_manager(self):
-        m = tk.Toplevel(self.root); m.title("Categories"); m.geometry("500x650")
-        m.configure(bg=self.colors["card"]); m.grab_set()
-        tree = ttk.Treeview(m, columns=("C", "N"), show="headings", height=15)
+        c = self.colors
+        m = tk.Toplevel(self.root); m.title("Categories"); m.geometry("500x600")
+        m.configure(bg=c["card"]); m.grab_set()
+        tree = ttk.Treeview(m, columns=("C", "N"), show="headings", height=14)
         tree.heading("C", text="Code"); tree.heading("N", text="Name")
         tree.pack(padx=20, pady=10, fill="both", expand=True)
 
         def refresh():
             for i in tree.get_children():
                 tree.delete(i)
-            for c, n in sorted(self.type_mapping.items()):
-                tree.insert("", "end", values=(c, n))
+            for code, name in sorted(self.type_mapping.items()):
+                tree.insert("", "end", values=(code, name))
         refresh()
-        ctrl = tk.Frame(m, bg=self.colors["card"], pady=10); ctrl.pack(fill="x", padx=20)
-        c_e = tk.Entry(ctrl, width=5); c_e.grid(row=0, column=0)
-        n_e = tk.Entry(ctrl, width=15); n_e.grid(row=0, column=1, padx=5)
+        ctrl = tk.Frame(m, bg=c["card"], pady=10); ctrl.pack(fill="x", padx=20)
+        c_e = tk.Entry(ctrl, width=6); c_e.grid(row=0, column=0)
+        n_e = tk.Entry(ctrl, width=18); n_e.grid(row=0, column=1, padx=5)
 
         def add():
-            c, n = c_e.get().strip().upper(), n_e.get().strip()
-            if c and n:
-                self.type_mapping[c] = n; self.save_settings(); refresh()
+            code, name = c_e.get().strip().upper(), n_e.get().strip()
+            if code and name:
+                self.type_mapping[code] = name; self.save_settings(); refresh()
                 c_e.delete(0, 100); n_e.delete(0, 100)
-        self.create_styled_button(ctrl, "ADD", add, self.colors["accent"], "#08120f").grid(row=0, column=2)
+        self._styled_button(ctrl, "ADD", add, c["accent"], c["on_accent"]).grid(row=0, column=2)
 
         def delete():
-            s = tree.selection()
-            if s:
-                code = tree.item(s[0])['values'][0]
-                if messagebox.askyesno("Confirm", f"Delete '{code}'?"):
-                    del self.type_mapping[str(code)]; self.save_settings(); refresh()
-        self.create_styled_button(m, "DELETE", delete, self.colors["error"], "#fff").pack(fill="x", padx=20, pady=20)
-
-    # ----------------------------- Image selector (shared) -----------------------------
-    def open_image_selector(self, folder_paths, max_per_folder, title, subtitle=""):
-        """Per-folder thumbnail selector. Returns {folder_path: [files]} or None if cancelled."""
-        win = tk.Toplevel(self.root); win.title(title); win.geometry("1120x860")
-        win.grab_set(); win.configure(bg=self.colors["bg"])
-
-        # Header (top)
-        head = tk.Frame(win, bg=self.colors["bg"]); head.pack(fill="x", padx=20, pady=(16, 2))
-        tk.Label(head, text=title, bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 14, "bold")).pack(anchor="w")
-        if subtitle:
-            tk.Label(head, text=subtitle, bg=self.colors["bg"], fg=self.colors["text_dim"],
-                     font=("Segoe UI", 9)).pack(anchor="w")
-
-        sel = {}
-        photo_refs = {}
-        count_var = tk.StringVar(value="เลือกแล้ว 0 รูป")
-
-        def update_count():
-            n = sum(len(v) for v in sel.values())
-            count_var.set(f"เลือกแล้ว {n} รูป")
-
-        # Bottom action bar — packed BEFORE the scroll area so it always stays visible
-        btns = tk.Frame(win, bg=self.colors["bg_alt"]); btns.pack(fill="x", side="bottom")
-        btns_in = tk.Frame(btns, bg=self.colors["bg_alt"]); btns_in.pack(fill="x", padx=20, pady=14)
-        tk.Label(btns_in, textvariable=count_var, bg=self.colors["bg_alt"], fg=self.colors["text"],
-                 font=("Segoe UI", 10, "bold")).pack(side="left")
-        confirmed = {"ok": False}
-
-        def on_ok():
-            final = {k: v for k, v in sel.items() if v}
-            if not final:
-                messagebox.showwarning("แจ้งเตือน", "กรุณาเลือกอย่างน้อย 1 รูป", parent=win)
-                return
-            confirmed["ok"] = True
-            sel.clear(); sel.update(final)
-            win.destroy()
-
-        tk.Button(btns_in, text="ยืนยัน ✓", command=on_ok, bg=self.colors["accent"], fg="#08120f",
-                  font=("Segoe UI", 11, "bold"), padx=28, pady=8, relief="flat", cursor="hand2").pack(side="right")
-        tk.Button(btns_in, text="ยกเลิก", command=win.destroy, bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", font=("Segoe UI", 10, "bold"), padx=20, pady=8,
-                  cursor="hand2").pack(side="right", padx=(0, 10))
-
-        # Scroll area (fills remaining space)
-        container = tk.Frame(win, bg=self.colors["bg"]); container.pack(fill="both", expand=True, padx=20, pady=10)
-        canvas = tk.Canvas(container, bg=self.colors["bg"], highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
-        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        scroll_f = tk.Frame(canvas, bg=self.colors["bg"]); canvas.create_window((0, 0), window=scroll_f, anchor="nw")
-        scroll_f.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-
-        def _wheel(e):
-            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        canvas.bind_all("<MouseWheel>", _wheel)
-
-        any_image = False
-        for f_path in folder_paths:
-            f_name = os.path.basename(f_path)
-            row = tk.Frame(scroll_f, bg=self.colors["card"], pady=10, padx=10,
-                           highlightthickness=1, highlightbackground=self.colors["border"])
-            row.pack(fill="x", pady=5)
-            tk.Label(row, text=f_name, bg=self.colors["card"], fg=self.colors["text_dim"],
-                     font=("Consolas", 10, "bold"), width=14, anchor="w").pack(side="left", padx=8)
-            img_container = tk.Frame(row, bg=self.colors["card"]); img_container.pack(side="left", fill="x", expand=True)
-            try:
-                files = sorted([f for f in os.listdir(f_path) if self.is_image_file(f)])
-            except Exception:
-                files = []
-            sel[f_path] = []
-            if not files:
-                tk.Label(img_container, text="(ไม่มีรูปในโฟลเดอร์นี้)", bg=self.colors["card"],
-                         fg=self.colors["text_mute"], font=("Segoe UI", 9)).pack(side="left", padx=8)
-            for f in files:
-                try:
-                    full_p = os.path.join(f_path, f)
-                    img = Image.open(full_p); img.thumbnail((110, 110)); ph = ImageTk.PhotoImage(img)
-                    photo_refs[full_p] = ph
-                    any_image = True
-                    cell = tk.Frame(img_container, bg=self.colors["card"]); cell.pack(side="left", padx=4)
-                    lbl = tk.Label(cell, image=ph, bg=self.colors["card"], borderwidth=3,
-                                   relief="flat", cursor="hand2",
-                                   highlightthickness=3, highlightbackground=self.colors["card"])
-                    lbl.pack()
-
-                    def toggle(f_p=f_path, fn=f, b=lbl):
-                        if fn in sel[f_p]:
-                            sel[f_p].remove(fn)
-                            b.config(relief="flat", highlightbackground=self.colors["card"], highlightcolor=self.colors["card"])
-                        else:
-                            if max_per_folder is not None and len(sel[f_p]) >= max_per_folder:
-                                messagebox.showwarning("จำกัด", f"เลือกได้สูงสุด {max_per_folder} รูป/โฟลเดอร์", parent=win)
-                                return
-                            sel[f_p].append(fn)
-                            b.config(relief="solid", highlightbackground=self.colors["accent"], highlightcolor=self.colors["accent"])
-                        update_count()
-                    lbl.bind("<Button-1>", lambda e, f_p=f_path, fn=f, b=lbl: toggle(f_p, fn, b))
-                except Exception:
-                    pass
-
-        if not any_image:
-            self.log("ไม่พบรูปในโฟลเดอร์ที่เลือก", "warning")
-
-        self.root.wait_window(win)
-        try:
-            canvas.unbind_all("<MouseWheel>")
-        except Exception:
-            pass
-        return dict(sel) if confirmed["ok"] else None
-
-    # ----------------------------- Phase 0: Import New -----------------------------
-    def run_phase_0_import(self):
-        cam = self.camera_source.get()
-        dst = self.source_dir.get()
-        if not cam or not os.path.exists(cam):
-            messagebox.showerror("Error", f"{self.error_codes['E001']}\n\nกรุณาตั้งค่า 'Camera Source' ในหน้า Settings (⚙)")
-            return
-        if not dst:
-            messagebox.showerror("Error", "ยังไม่ได้เลือกโฟลเดอร์ Workspace ปลายทาง")
-            return
-        if not os.path.exists(dst):
-            try:
-                os.makedirs(dst)
-            except Exception as e:
-                messagebox.showerror("Error", str(e)); return
-
-        def task():
-            self.set_running("phase0", True)
-            self.set_progress_threadsafe(0, 100)
-            manifest = self.load_manifest()
-            try:
-                all_files = [f for f in os.listdir(cam)
-                             if os.path.isfile(os.path.join(cam, f)) and self.is_media_file(f)]
-            except Exception as e:
-                self.log_threadsafe(f"อ่านโฟลเดอร์กล้องไม่ได้: {e}", "error", "E003")
-                self.set_running("phase0", False); return
-
-            new_files = []
-            for f in all_files:
-                full = os.path.join(cam, f)
-                try:
-                    st = os.stat(full)
-                    sig = f"{f}|{st.st_size}|{int(st.st_mtime)}"
-                except Exception:
-                    continue
-                if sig not in manifest:
-                    new_files.append((f, full, sig))
-
-            if not new_files:
-                self.log_threadsafe("ไม่มีรูปใหม่ — ดึงไปแล้วทั้งหมด (จำได้จากครั้งก่อน)", "warning")
-                self.set_running("phase0", False); return
-
-            self.log_threadsafe(f"พบรูปใหม่ {len(new_files)} ไฟล์ กำลังนำเข้า...", "highlight")
-            copied = 0
-            for i, (f, full, sig) in enumerate(new_files):
-                m = re.search(r'(\d{4})', f)
-                code = m.group(1) if m else "_ungrouped"
-                target_dir = os.path.join(dst, code)
-                try:
-                    os.makedirs(target_dir, exist_ok=True)
-                    dest = os.path.join(target_dir, f)
-                    if os.path.exists(dest):
-                        name, ext = os.path.splitext(f)
-                        dest = os.path.join(target_dir, f"{name}_dup{ext}")
-                    shutil.copy2(full, dest)
-                    manifest.add(sig); copied += 1
-                except Exception as e:
-                    self.log_threadsafe(f"คัดลอกไม่สำเร็จ {f}: {e}", "error", "E007")
-                self.set_progress_threadsafe((i + 1) / len(new_files) * 100)
-
-            self.save_manifest(manifest)
-            self.log_threadsafe(f"นำเข้าสำเร็จ {copied} ไฟล์ — ต้นฉบับยังอยู่ที่เดิม", "success")
-            self.mark_completed("0")
-            self.set_running("phase0", False)
-        threading.Thread(target=task, daemon=True).start()
-
-    # ----------------------------- Phase 1: Group by Code -----------------------------
-    def run_phase_1(self):
-        src = self.source_dir.get()
-        if not src or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-        files = [f for f in os.listdir(src) if os.path.isfile(os.path.join(src, f))]
-        if not files:
-            messagebox.showinfo("Info", self.error_codes["E002"]); return
-
-        def task():
-            self.set_running("phase1", True); moved = 0
-            for i, f in enumerate(files):
-                m = re.search(r'(\d{4})', f)
-                if m:
-                    c = m.group(1); t = os.path.join(src, c)
-                    if not os.path.exists(t):
-                        os.makedirs(t)
-                    try:
-                        shutil.move(os.path.join(src, f), os.path.join(t, f)); moved += 1
-                    except Exception as e:
-                        self.log_threadsafe(f"Move failed for {f}: {e}", "error", "E007")
-                self.set_progress_threadsafe((i + 1) / len(files) * 100)
-            self.log_threadsafe(f"ขั้นตอนที่ 1: จัดกลุ่ม {moved} ไฟล์สำเร็จ", "success")
-            self.mark_completed("1")
-            self.set_running("phase1", False)
-        threading.Thread(target=task, daemon=True).start()
-
-    # ----------------------------- Phase 1.5: AI Retouch (ChatGPT) -----------------------------
-    def run_phase_ai_retouch(self):
-        src = self.source_dir.get()
-        if not src or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-
-        folders = sorted([os.path.join(src, d) for d in os.listdir(src)
-                          if os.path.isdir(os.path.join(src, d)) and d not in ("ai_retouched",)])
-        if not folders:
-            self.log("ขั้นตอน 1.5: ไม่พบโฟลเดอร์ ลองทำขั้นตอน 0 หรือ 1 ก่อน", "warning")
-            messagebox.showinfo("Info", "ยังไม่มีโฟลเดอร์ กรุณาทำขั้นตอนที่ 0 หรือ 1 ก่อน")
-            return
-
-        sel = self.open_image_selector(folders, 2, "เลือกรูปสำหรับรีทัช AI (สูงสุด 2 รูป/โฟลเดอร์)",
-                                       "ติ๊กเลือกรูปที่จะส่งเข้า ChatGPT แล้วกดยืนยัน")
-        if not sel:
-            self.log("ขั้นตอน 1.5: ยกเลิกการเลือก", "warning")
-            return
-        self.ai_tasks = {k: {"files": v, "is_earring": len(v) == 2} for k, v in sel.items() if v}
-        if not self.ai_tasks:
-            return
-
-        total = sum(len(v["files"]) for v in self.ai_tasks.values())
-        self.log(f"ขั้นตอน 1.5: เริ่มรีทัช {total} รูป ใน {len(self.ai_tasks)} โฟลเดอร์...", "highlight")
-        self.ai_cancel_event.clear()
-        self.set_running("phase1_5", True)
-        self._set_ai_btn_cancel()
-        threading.Thread(target=self.chatgpt_agent_process, daemon=True).start()
-
-    def _set_ai_btn_cancel(self):
-        try:
-            if self.ai_btn is not None and self.ai_btn.winfo_exists():
-                self.ai_btn.config(text="■ ยกเลิก", bg=self.colors["error"], fg="#ffffff",
-                                   command=self.cancel_ai, state="normal")
-        except tk.TclError:
-            pass
-
-    def cancel_ai(self):
-        self.ai_cancel_event.set()
-        self.log("กำลังยกเลิก... จะหยุดหลังรูปปัจจุบันเสร็จ", "warning")
-        try:
-            if self.ai_btn is not None and self.ai_btn.winfo_exists():
-                self.ai_btn.config(text="⌛ กำลังยกเลิก...", state="disabled")
-        except tk.TclError:
-            pass
-
-    def chatgpt_agent_process(self):
-        gpt_url = self.chatgpt_url.get().strip()
-        self.log_threadsafe("ขั้นตอน 1.5: กำลังเปิดเบราว์เซอร์ ChatGPT...", "highlight")
-
-        if not HAS_CHATGPT:
-            self.log_threadsafe("โหลดโมดูล chatgpt_retouch ไม่ได้ (ตรวจว่ามีไฟล์ chatgpt_retouch.py)", "error")
-            self.stop_ai_vis(); return
-
-        def on_log(msg, level="info"):
-            self.log_threadsafe(msg, level)
-
-        def on_result(fname, success, error=""):
-            if success:
-                self.log_threadsafe(f"  > ChatGPT รีทัชสำเร็จ: {fname}", "success")
-            else:
-                self.log_threadsafe(f"  > ล้มเหลว {fname}: {error}", "error")
-
-        try:
-            chatgpt_retouch.run_retouch_blocking(self.ai_tasks, gpt_url, on_log, on_result,
-                                                 should_cancel=self.ai_cancel_event.is_set,
-                                                 profile_dir=self.chrome_profile_dir.get())
-        except Exception as e:
-            self.log_threadsafe(f"ChatGPT automation error: {e}", "error")
-
-        if self.ai_cancel_event.is_set():
-            self.log_threadsafe("ขั้นตอน 1.5: ยกเลิกแล้ว", "warning")
-        else:
-            self.log_threadsafe("ขั้นตอน 1.5: รีทัช AI เสร็จสิ้น", "highlight")
-            self.mark_completed("1.5")
-        self.stop_ai_vis()
-
-    def stop_ai_vis(self):
-        self.set_running("phase1_5", False)
-
-        def _restore():
-            try:
-                if self.ai_btn is not None and self.ai_btn.winfo_exists():
-                    self.ai_btn.config(text=self.ai_btn_default_text, bg=self.colors["highlight"],
-                                       fg="#08120f", command=self.run_phase_ai_retouch, state="normal")
-            except tk.TclError:
-                pass
-        self.root.after(0, _restore)
-
-    # ----------------------------- Phase 1.6: Merge (manual selection) -----------------------------
-    def run_phase_merge(self):
-        src = self.source_dir.get()
-        if not src or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-        folders = sorted([os.path.join(src, d) for d in os.listdir(src)
-                          if os.path.isdir(os.path.join(src, d)) and d not in ("ai_retouched",)])
-        if not folders:
-            messagebox.showinfo("Info", "ยังไม่มีโฟลเดอร์ กรุณาทำขั้นตอนที่ 0 หรือ 1 ก่อน")
-            return
-
-        sel = self.open_image_selector(folders, 2, "เลือก 2 รูปต่อโฟลเดอร์เพื่อรวม (Merge)",
-                                       "เลือกรูปหน้า/ข้าง ในแต่ละโฟลเดอร์ที่ต้องการรวม (2 รูป/โฟลเดอร์) แล้วกดยืนยัน")
-        if not sel:
-            self.log("ขั้นตอน 1.6: ยกเลิกการเลือก", "warning")
-            return
-        merge_list = [(k, v) for k, v in sel.items() if len(v) == 2]
-        if not merge_list:
-            messagebox.showinfo("Info", "ต้องเลือกครบ 2 รูปในโฟลเดอร์ที่จะรวม")
-            return
-
-        def task():
-            self.set_running("phase1_6", True)
-            self.log_threadsafe(f"ขั้นตอน 1.6: เริ่มรวมรูป {len(merge_list)} โฟลเดอร์...", "highlight")
-            for i, (f_path, files) in enumerate(merge_list):
-                f_n = os.path.basename(f_path)
-                paths = [os.path.join(f_path, f) for f in files]
-                self.log_threadsafe(f"รวมรูป: {f_n} ({i + 1}/{len(merge_list)})", "info")
-                self.merge_done_event = threading.Event()
-                self.root.after(0, lambda p=paths, d=f_path, n=f_n, idx=i + 1, total=len(merge_list):
-                                self.open_interactive_merge_ui(p, d, n, idx, total))
-                self.merge_done_event.wait()
-            self.set_running("phase1_6", False)
-            self.mark_completed("1.6")
-            self.log_threadsafe("รวมรูปเสร็จสิ้น", "success")
-        threading.Thread(target=task, daemon=True).start()
-
-    def open_interactive_merge_ui(self, ai_paths, out_dir, folder_name, current, total):
-        win = tk.Toplevel(self.root); win.title(f"MERGE: {folder_name} ({current}/{total})")
-        win.geometry("860x880"); win.grab_set(); win.configure(bg=self.colors["bg"])
-        COMP, PV = 2000, 640
-
-        try:
-            base_imgs = [Image.open(p).convert("RGBA") for p in ai_paths]
-        except Exception as e:
-            messagebox.showerror("Error", f"เปิดรูปไม่ได้: {e}", parent=win)
-            win.destroy(); self.merge_done_event.set(); return
-
-        # สองกรอบครึ่งจอ (ซ้าย/ขวา) — รูปถูก "ครอป" ให้อยู่ในกรอบของตัวเองเท่านั้น เหมือนกรอบใน Canva
-        frames = [(0, 0, COMP // 2, COMP), (COMP // 2, 0, COMP // 2, COMP)]
-        # ox, oy = จุดกึ่งกลางรูป เทียบกับมุมบนซ้ายของกรอบ (พิกัด composite)
-        state = [{"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2},
-                 {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}]
-        active = {"i": 0}
-        zoom_vars = [tk.DoubleVar(value=1.0), tk.DoubleVar(value=1.0)]
-
-        tk.Label(win, text=f"รวมรูปต่างหู — {folder_name}", bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
-        tk.Label(win, text="ลากรูปในกรอบเพื่อย้าย · ใช้แถบ ZOOM ของแต่ละฝั่งเพื่อย่อ/ขยาย (ส่วนที่เกินกรอบถูกครอป)",
-                 bg=self.colors["bg"], fg=self.colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
-
-        bar = tk.Frame(win, bg=self.colors["bg_alt"]); bar.pack(side="bottom", fill="x")
-        barin = tk.Frame(bar, bg=self.colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 8))
-
-        canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
-                           highlightbackground=self.colors["border"], cursor="fleur")
-        canvas.pack(pady=8)
-
-        def clamp(i):
-            fw, fh = frames[i][2], frames[i][3]
-            state[i]["ox"] = min(max(state[i]["ox"], 0), fw)
-            state[i]["oy"] = min(max(state[i]["oy"], 0), fh)
-
-        def build(size):
-            s = size / COMP
-            comp = Image.new('RGB', (size, size), (255, 255, 255))
-            for i, im in enumerate(base_imgs):
-                fx, fy, fw, fh = frames[i]
-                tw, th = max(1, int(fw * s)), max(1, int(fh * s))
-                tile = Image.new('RGB', (tw, th), (255, 255, 255))
-                boxw = max(1, int(fw * state[i]["scale"] * s))
-                boxh = max(1, int(fh * state[i]["scale"] * s))
-                t = im.copy(); t.thumbnail((boxw, boxh), Image.Resampling.LANCZOS)
-                ox = int(state[i]["ox"] * s - t.width / 2)
-                oy = int(state[i]["oy"] * s - t.height / 2)
-                tile.paste(t, (ox, oy), t)  # ส่วนที่เลยขอบ tile ถูกครอปทิ้งอัตโนมัติ
-                comp.paste(tile, (int(fx * s), int(fy * s)))
-            return comp
-
-        def refresh():
-            clamp(0); clamp(1)
-            canvas.delete("all")
-            # สร้างภาพจริงที่ความละเอียดเต็ม แล้วย่อมาโชว์ → preview ตรงกับไฟล์ที่ save 100%
-            comp = build(COMP).resize((PV, PV), Image.Resampling.BILINEAR)
-            ph = ImageTk.PhotoImage(comp); canvas.image = ph
-            canvas.create_image(0, 0, image=ph, anchor="nw")
-            # กรอบ guide + เส้นแบ่งกลาง (เฉพาะบนจอ ไม่ถูกบันทึกลงไฟล์)
-            for i in range(2):
-                fx, fy, fw, fh = frames[i]
-                s = PV / COMP
-                color = self.colors["accent"] if i == active["i"] else self.colors["text_mute"]
-                canvas.create_rectangle(fx * s + 1, fy * s + 1, (fx + fw) * s - 1, (fy + fh) * s - 1,
-                                        outline=color, width=2)
-            canvas.create_line(PV / 2, 0, PV / 2, PV, fill=self.colors["highlight"], width=1, dash=(6, 4))
-
-        drag = {"x": 0, "y": 0}
-
-        def on_press(e):
-            active["i"] = 0 if e.x < PV / 2 else 1
-            drag["x"], drag["y"] = e.x, e.y
-            refresh()
-
-        def on_drag(e):
-            f = COMP / PV
-            state[active["i"]]["ox"] += (e.x - drag["x"]) * f
-            state[active["i"]]["oy"] += (e.y - drag["y"]) * f
-            drag["x"], drag["y"] = e.x, e.y
-            refresh()
-
-        def on_wheel(e):
-            i = 0 if e.x < PV / 2 else 1
-            active["i"] = i
-            d = 1.1 if e.delta > 0 else 0.9
-            state[i]["scale"] = max(0.2, min(4.0, state[i]["scale"] * d))
-            zoom_vars[i].set(round(state[i]["scale"], 2))
-            refresh()
-
-        canvas.bind("<Button-1>", on_press)
-        canvas.bind("<B1-Motion>", on_drag)
-        canvas.bind("<MouseWheel>", on_wheel)
-
-        def apply_zoom(i):
-            state[i]["scale"] = max(0.2, min(4.0, zoom_vars[i].get()))
-            active["i"] = i
-            refresh()
-
-        # แถวควบคุม: ZOOM ซ้าย | ZOOM ขวา
-        zl = tk.Frame(ctrl, bg=self.colors["bg"]); zl.pack(side="left", fill="x", expand=True, padx=(0, 8))
-        tk.Label(zl, text="ZOOM ซ้าย", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
-        tk.Scale(zl, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[0], orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 troughcolor=self.colors["card"], command=lambda e: apply_zoom(0)).pack(fill="x")
-        zr = tk.Frame(ctrl, bg=self.colors["bg"]); zr.pack(side="left", fill="x", expand=True, padx=(8, 8))
-        tk.Label(zr, text="ZOOM ขวา", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
-        tk.Scale(zr, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[1], orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 troughcolor=self.colors["card"], command=lambda e: apply_zoom(1)).pack(fill="x")
-
-        def swap():
-            base_imgs[0], base_imgs[1] = base_imgs[1], base_imgs[0]
-            state[0], state[1] = state[1], state[0]
-            zoom_vars[0].set(round(state[0]["scale"], 2)); zoom_vars[1].set(round(state[1]["scale"], 2))
-            refresh()
-        tk.Button(ctrl, text="⇄ สลับ", command=swap, bg=self.colors["btn_default"], fg=self.colors["text"],
-                  relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(0, 6))
-
-        def reset():
-            for i in range(2):
-                state[i] = {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}
-                zoom_vars[i].set(1.0)
-            refresh()
-        tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=self.colors["btn_default"], fg=self.colors["text"],
-                  relief="flat", cursor="hand2", padx=10).pack(side="left")
-
-        def save_and_next():
-            build(COMP).save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
-            win.destroy(); self.merge_done_event.set()
-        tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
-                  font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
-        tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), self.merge_done_event.set()],
-                  bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
-                  font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
-
-        win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.merge_done_event.set()])
-        refresh()
-
-    # ----------------------------- Phase 1.7: Crop (manual selection) -----------------------------
-    def run_phase_crop(self):
-        src = self.source_dir.get()
-        if not src or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-        folders = sorted([os.path.join(src, d) for d in os.listdir(src)
-                          if os.path.isdir(os.path.join(src, d)) and d not in ("ai_retouched",)])
-        if not folders:
-            messagebox.showinfo("Info", "ยังไม่มีโฟลเดอร์ กรุณาทำขั้นตอนที่ 0 หรือ 1 ก่อน")
-            return
-
-        sel = self.open_image_selector(folders, None, "เลือกรูปที่จะครอบตัด (เลือกได้หลายรูป)",
-                                       "ติ๊กเลือกรูปที่ต้องการครอบตัด แล้วกดยืนยัน — ระบบจะดึงมาให้ครอบตัดทีละรูป")
-        if not sel:
-            self.log("ขั้นตอน 1.7: ยกเลิกการเลือก", "warning")
-            return
-        crop_list = []
-        for f_path, files in sel.items():
-            for f in files:
-                crop_list.append((os.path.join(f_path, f), f_path, f))
-        if not crop_list:
-            return
-
-        def task():
-            self.set_running("phase1_7", True)
-            self.log_threadsafe(f"ขั้นตอน 1.7: เริ่มครอบตัด {len(crop_list)} รูป...", "highlight")
-            for i, (img_path, out_dir, filename) in enumerate(crop_list):
-                self.log_threadsafe(f"ครอบตัด: {filename} ({i + 1}/{len(crop_list)})", "info")
-                self.crop_done_event = threading.Event()
-                self.root.after(0, lambda p=img_path, d=out_dir, n=filename, idx=i + 1, total=len(crop_list):
-                                self.open_interactive_crop_ui(p, d, n, idx, total))
-                self.crop_done_event.wait()
-            self.set_running("phase1_7", False)
-            self.mark_completed("1.7")
-            self.log_threadsafe("ครอบตัดเสร็จสิ้น", "success")
-        threading.Thread(target=task, daemon=True).start()
-
-    def open_interactive_crop_ui(self, img_path, out_dir, filename, current, total):
-        win = tk.Toplevel(self.root); win.title(f"CROP: {filename} ({current}/{total})")
-        win.geometry("860x880"); win.grab_set(); win.configure(bg=self.colors["bg"])
-        COMP, PV = 2000, 640
-
-        try:
-            base = Image.open(img_path).convert("RGBA")
-        except Exception as e:
-            messagebox.showerror("Error", f"เปิดรูปไม่ได้: {e}", parent=win)
-            win.destroy(); self.crop_done_event.set(); return
-
-        st = {"scale": 1.0, "cx": COMP / 2, "cy": COMP / 2}
-        scale_var = tk.DoubleVar(value=1.0)
-
-        tk.Label(win, text=f"ครอบตัด & จัดตำแหน่ง — {filename}", bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
-        tk.Label(win, text="ลากเพื่อย้ายรูป · ล้อเมาส์หรือแถบเลื่อนเพื่อซูมเข้า/ออก",
-                 bg=self.colors["bg"], fg=self.colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
-
-        bar = tk.Frame(win, bg=self.colors["bg_alt"]); bar.pack(side="bottom", fill="x")
-        barin = tk.Frame(bar, bg=self.colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
-
-        canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
-                           highlightbackground=self.colors["border"], cursor="fleur")
-        canvas.pack(pady=8)
-
-        bw, bh = base.size
-
-        def build(size):
-            s = size / COMP
-            comp = Image.new('RGB', (size, size), (255, 255, 255))
-            # COVER: ที่ scale=1 ด้านสั้นเต็มกรอบ ส่วนเกินถูกครอปออกจริง (ไม่เหลือขอบขาว)
-            target = max(10.0, COMP * st["scale"] * s)
-            r = target / min(bw, bh)
-            nw, nh = max(1, int(bw * r)), max(1, int(bh * r))
-            t = base.resize((nw, nh), Image.Resampling.LANCZOS)
-            x = int(st["cx"] * s - nw / 2)
-            y = int(st["cy"] * s - nh / 2)
-            comp.paste(t, (x, y), t)
-            return comp
-
-        def refresh():
-            canvas.delete("all")
-            # สร้างภาพจริงที่ความละเอียดเต็ม แล้วย่อมาโชว์ → preview ตรงกับไฟล์ที่ save 100%
-            comp = build(COMP).resize((PV, PV), Image.Resampling.BILINEAR)
-            ph = ImageTk.PhotoImage(comp); canvas.image = ph
-            canvas.create_image(0, 0, image=ph, anchor="nw")
-
-        drag = {"x": 0, "y": 0}
-
-        def on_press(e):
-            drag["x"], drag["y"] = e.x, e.y
-
-        def on_drag(e):
-            f = COMP / PV
-            st["cx"] += (e.x - drag["x"]) * f
-            st["cy"] += (e.y - drag["y"]) * f
-            drag["x"], drag["y"] = e.x, e.y
-            refresh()
-
-        def apply_scale(v):
-            st["scale"] = max(0.1, min(3.0, v))
-            refresh()
-
-        def on_wheel(e):
-            d = 1.1 if e.delta > 0 else 0.9
-            apply_scale(st["scale"] * d)
-            scale_var.set(round(st["scale"], 2))
-
-        canvas.bind("<Button-1>", on_press)
-        canvas.bind("<B1-Motion>", on_drag)
-        canvas.bind("<MouseWheel>", on_wheel)
-
-        tk.Label(ctrl, text="ZOOM", bg=self.colors["bg"], fg=self.colors["text"], width=6, anchor="w").pack(side="left")
-        tk.Scale(ctrl, from_=0.1, to=3.0, resolution=0.05, variable=scale_var, orient="horizontal",
-                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
-                 troughcolor=self.colors["card"], command=lambda e: apply_scale(scale_var.get())).pack(
-            side="left", fill="x", expand=True)
-
-        def reset():
-            st["scale"] = 1.0; st["cx"] = COMP / 2; st["cy"] = COMP / 2
-            scale_var.set(1.0); refresh()
-        tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=self.colors["btn_default"], fg=self.colors["text"],
-                  relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(10, 0))
-
-        def save_and_next():
-            build(COMP).save(img_path, "JPEG", quality=95, optimize=True)
-            win.destroy(); self.crop_done_event.set()
-        tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
-                  font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
-        tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), self.crop_done_event.set()],
-                  bg=self.colors["btn_default"], fg=self.colors["text"], relief="flat",
-                  font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
-
-        win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), self.crop_done_event.set()])
-        refresh()
-
-    # ----------------------------- Phase 2: Rename & Primary -----------------------------
-    def run_phase_rename(self):
-        src = self.source_dir.get()
-        if not src or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-        folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
-        if not folders:
-            messagebox.showinfo("Info", "ไม่พบโฟลเดอร์ กรุณาทำขั้นตอนที่ 0 หรือ 1 ก่อน")
-            return
-
-        def task():
-            self.set_running("phase2", True)
-            for i, folder_name in enumerate(folders):
-                base_path = os.path.join(src, folder_name)
-                files = sorted([f for f in os.listdir(base_path) if self.is_media_file(f)])
-                if files:
-                    self.root.after(0, lambda f=files, n=folder_name, b=base_path: self.process_rename_visual(b, f, n, b))
-                self.set_progress_threadsafe((i + 1) / len(folders) * 100)
-            self.mark_completed("2")
-            self.set_running("phase2", False)
-        threading.Thread(target=task, daemon=True).start()
-
-    def process_rename_visual(self, work_dir, files, folder_name, base_path):
-        # รูปหลักต้องเป็นรูปภาพ; วิดีโอและรูปอื่นจะถูกเปลี่ยนชื่อตามด้วย -2, -3 ...
-        images = [f for f in files if self.is_image_file(f)]
-        if images:
-            main_file = self.choose_main_file_visual(work_dir, images, folder_name)
-            if not main_file:
-                return
-        else:
-            main_file = files[0] if files else None
-        if not main_file:
-            return
-
-        temp_dir = os.path.join(base_path, "_rename_temp")
-        if os.path.exists(temp_dir):
-            self.log(f"พบโฟลเดอร์ _rename_temp ของ {folder_name} อยู่แล้ว ข้ามเพื่อกันไฟล์กู้คืนถูกเขียนทับ", "error", "E007")
-            return
-        try:
-            os.makedirs(temp_dir)
-            planned_names = {}
-            ext = os.path.splitext(main_file)[1].lower()
-            planned_names[main_file] = f"{folder_name}{ext}"
-            counter = 2
-            for f in files:
-                if f == main_file:
-                    continue
-                e = os.path.splitext(f)[1].lower()
-                planned_names[f] = f"{folder_name}-{counter}{e}"
-                counter += 1
-            for f in files:
-                shutil.move(os.path.join(base_path, f), os.path.join(temp_dir, f))
-            for original, final in planned_names.items():
-                final_path = os.path.join(base_path, final)
-                if os.path.exists(final_path):
-                    os.replace(final_path, os.path.join(temp_dir, f"existing_{final}"))
-                shutil.copy2(os.path.join(temp_dir, original), final_path)
-            shutil.rmtree(temp_dir)
-            self.log(f"เปลี่ยนชื่อสำเร็จ: {folder_name} ({len(planned_names)} ไฟล์)", "success")
-        except Exception as e:
-            self.log(f"เปลี่ยนชื่อไม่สำเร็จ {folder_name}: {e}. ไฟล์กู้คืนอยู่ใน _rename_temp", "error", "E007")
-
-    def choose_main_file_visual(self, folder_path, files, folder_name):
-        if len(files) <= 1:
-            return files[0]
-        win = tk.Toplevel(self.root); win.title(f"เลือกรูปหลัก: {folder_name}")
-        win.geometry("1040x780"); win.grab_set(); win.configure(bg=self.colors["bg"])
-        res = tk.StringVar()
-        tk.Label(win, text=f"เลือกรูปหลัก (PRIMARY PHOTO) — โฟลเดอร์ {folder_name}", bg=self.colors["bg"],
-                 fg=self.colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=10)
-        can = tk.Canvas(win, bg=self.colors["bg"], highlightthickness=0)
-        can.pack(side="left", fill="both", expand=True, padx=10)
-        sb = ttk.Scrollbar(win, orient="vertical", command=can.yview); sb.pack(side="right", fill="y")
-        can.configure(yscrollcommand=sb.set)
-        gal = tk.Frame(can, bg=self.colors["bg"]); can.create_window((0, 0), window=gal, anchor="nw")
-        gal.bind("<Configure>", lambda e: can.configure(scrollregion=can.bbox("all")))
-        photo_refs = []
-        for i, f in enumerate(files):
-            try:
-                img = Image.open(os.path.join(folder_path, f)); img.thumbnail((160, 160))
-                ph = ImageTk.PhotoImage(img); photo_refs.append(ph)
-                cell = tk.Frame(gal, bg=self.colors["card"], padx=6, pady=6,
-                                highlightthickness=1, highlightbackground=self.colors["border"])
-                cell.grid(row=i // 5, column=i % 5, padx=8, pady=8)
-                lbl = tk.Label(cell, image=ph, bg=self.colors["card"], cursor="hand2"); lbl.pack()
-                name = tk.Label(cell, text=f, bg=self.colors["card"], fg=self.colors["text_dim"],
-                                font=("Consolas", 8), wraplength=160, cursor="hand2")
-                name.pack(pady=(4, 0))
-                for wdg in (lbl, name):
-                    wdg.bind("<Button-1>", lambda e, f=f: [res.set(f), win.destroy()])
-            except Exception as e:
-                self.log(f"ข้ามตัวอย่าง {f}: {e}", "warning")
-        self.root.wait_window(win)
-        return res.get() if res.get() else files[0]
-
-    # ----------------------------- Phase 3: Collect to Database -----------------------------
-    def get_range(self, num):
-        start = ((num - 1) // 200) * 200 + 1
-        return f"{start:03d}-{start + 199:03d}"
-
-    def run_phase_backup(self):
-        src, p1, p2 = self.source_dir.get(), self.photo1_dir.get(), self.photo2_dir.get()
-        if not all([src, p1, p2]):
-            messagebox.showwarning("Warning", "กรุณาตั้งค่า Photo 1 และ Photo 2 ในหน้า Settings")
-            return
-        missing = [p for p in [src, p1, p2] if not os.path.exists(p)]
-        if missing:
-            messagebox.showerror("Error", f"{self.error_codes['E005']}\n" + "\n".join(missing))
-            return
-
-        def task():
-            self.set_running("phase3", True); s_c = 0
-            folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
-            for i, f_n in enumerate(folders):
-                f_p = os.path.join(src, f_n)
-                # เอาเฉพาะรูปหลักรูปเดียว (ชื่อไฟล์ตรงกับรหัสโฟลเดอร์พอดี เช่น 1212.jpg ไม่เอา 1212-2.jpg)
-                files_to_copy = [f for f in os.listdir(f_p)
-                                 if self.is_image_file(f) and os.path.splitext(f)[0].lower() == f_n.lower()]
-                if not files_to_copy:
-                    continue
-                p_t = self.type_mapping.get(f_n[0].upper(), "Other")
-                m = re.search(r'(\d+)', f_n); r_v = int(m.group(1)) if m else 0
-                t_r = os.path.join("Vincentio", p_t) if "-VN-" in f_n.upper() else os.path.join(p_t, f"{p_t} {self.get_range(r_v)}")
-                for dest_base in [p1, p2]:
-                    t_dir = os.path.join(dest_base, t_r)
-                    try:
-                        os.makedirs(t_dir, exist_ok=True)
-                        for f in files_to_copy:
-                            shutil.copy2(os.path.join(f_p, f), os.path.join(t_dir, f)); s_c += 1
-                    except Exception as e:
-                        self.log_threadsafe(f"Copy failed for {f_n} to {t_dir}: {e}", "error", "E007")
-                self.set_progress_threadsafe((i + 1) / len(folders) * 100)
-            self.log_threadsafe(f"ขั้นตอนที่ 3: เก็บไฟล์เข้าฐานข้อมูล {s_c} ไฟล์สำเร็จ", "success")
-            self.mark_completed("3")
-            self.set_running("phase3", False)
-        threading.Thread(target=task, daemon=True).start()
-
-    # ----------------------------- Phase 4: Archive -----------------------------
-    def run_phase_archive(self):
-        src, arc = self.source_dir.get(), self.archive_dir.get()
-        if not all([src, arc]) or not os.path.exists(src):
-            messagebox.showerror("Error", self.error_codes["E001"]); return
-
-        def task():
-            self.set_running("phase4", True)
-            now = datetime.now()
-            path = os.path.join(arc, now.strftime("%Y"), now.strftime("%m-%Y"), now.strftime("%d-%m-%Y"))
-            os.makedirs(path, exist_ok=True)
-            folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d))]
-            for f_n in folders:
-                try:
-                    shutil.move(os.path.join(src, f_n), os.path.join(path, f_n))
-                except Exception as e:
-                    self.log_threadsafe(f"Archive failed for {f_n}: {e}", "error", "E007")
-            self.log_threadsafe("ขั้นตอนที่ 4: ย้ายเข้าคลังสำเร็จ", "success")
-            self.mark_completed("4")
-            self.set_running("phase4", False)
-        threading.Thread(target=task, daemon=True).start()
+            sel = tree.selection()
+            if sel:
+                code = str(tree.item(sel[0])['values'][0])
+                if messagebox.askyesno("Confirm", f"ลบ '{code}'?"):
+                    self.type_mapping.pop(code, None); self.save_settings(); refresh()
+        self._styled_button(m, "DELETE", delete, c["error"], "#fff").pack(fill="x", padx=20, pady=14)
 
 
 if __name__ == "__main__":
