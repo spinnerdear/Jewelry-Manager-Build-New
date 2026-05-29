@@ -28,34 +28,149 @@ PROMPT = (
 )
 
 
-async def _wait_for_generated_image(page, timeout_s=120):
-    selectors = [
-        '[data-message-author-role="assistant"] img[src*="oaiusercontent"]',
-        '[data-message-author-role="assistant"] img[src*="blob:"]',
-        '.group img[alt*="Generated"]',
-        '[data-message-author-role="assistant"] img',
-    ]
-    for _ in range(timeout_s):
-        await asyncio.sleep(1)
-        for sel in selectors:
-            els = page.locator(sel)
-            if await els.count() > 0:
-                last_img = els.last
-                src = await last_img.get_attribute("src")
-                if src and len(src) > 20:
-                    return last_img, src
-    return None, None
+# JS: เก็บ src ของรูปทั้งหมดบนหน้า (ใช้ทำ baseline ก่อนส่ง)
+_SNAPSHOT_JS = """
+() => [...document.querySelectorAll('img')].map(im => im.src).filter(s => s && s.length > 10)
+"""
+
+# JS: หา "รูปใหม่ที่ใหญ่พอ" ที่ยังไม่อยู่ใน baseline (known) — ไม่ผูกกับ DOM ของ assistant
+_FIND_NEW_IMAGE_JS = """
+(known) => {
+    const set = new Set(known);
+    const imgs = [...document.querySelectorAll('img')];
+    let best = null, area = 0;
+    for (const im of imgs) {
+        const s = im.src || '';
+        if (!s || s.length < 10) continue;
+        if (set.has(s)) continue;
+        // ข้ามไอคอน sprite/svg/อวาตาร์
+        if (s.startsWith('data:image/svg')) continue;
+        const w = im.naturalWidth || im.width || 0;
+        const h = im.naturalHeight || im.height || 0;
+        if (Math.min(w, h) < 200) continue;
+        const a = w * h;
+        if (a > area) { area = a; best = im; }
+    }
+    if (!best) return null;
+    const r = best.getBoundingClientRect();
+    return {src: best.src, x: r.x, y: r.y, w: r.width, h: r.height,
+            nw: best.naturalWidth, nh: best.naturalHeight};
+}
+"""
+
+# JS: นับรูปที่ "ใหญ่พอ" ทั้งหมด + ใหญ่สุด (ไว้ debug ตอนหาไม่เจอ)
+_DEBUG_IMAGES_JS = """
+() => {
+    const imgs = [...document.querySelectorAll('img')];
+    let big = 0, maxw = 0, maxh = 0;
+    for (const im of imgs) {
+        const w = im.naturalWidth || im.width || 0;
+        const h = im.naturalHeight || im.height || 0;
+        if (Math.min(w, h) >= 200) big++;
+        if (w > maxw) maxw = w;
+        if (h > maxh) maxh = h;
+    }
+    return {total: imgs.length, big: big, maxw: maxw, maxh: maxh};
+}
+"""
+
+# วลีที่บ่งบอกว่า "ติดลิมิตจริง" — เลือกเฉพาะที่ไม่กำกวม (เลี่ยงคำ sidebar เช่น Upgrade)
+_LIMIT_PHRASES = [
+    "you've hit the", "you have hit the", "you've reached", "you have reached",
+    "reached your limit", "hit your limit", "image generation limit",
+    "limit for creating images", "create more images after", "able to create more",
+    "try again later", "come back later", "rate limit", "too many requests",
+    "ใช้งานครบ", "เกินขีดจำกัด", "ลองใหม่อีกครั้งภายหลัง", "สร้างรูปได้อีกครั้ง",
+]
+
+# JS: ดึงเฉพาะข้อความในคำตอบล่าสุดของ assistant + กล่อง dialog/alert (เลี่ยง sidebar/upsell)
+_LIMIT_TEXT_JS = """
+() => {
+    let parts = [];
+    const turns = document.querySelectorAll('[data-message-author-role="assistant"]');
+    if (turns.length) parts.push(turns[turns.length - 1].innerText || '');
+    document.querySelectorAll('[role="dialog"], [role="alert"]').forEach(d => parts.push(d.innerText || ''));
+    return parts.join(' \\n ');
+}
+"""
 
 
-async def _download_image(page, img_element, out_path, on_log):
+async def _check_limit(page):
+    """คืนข้อความเตือนถ้าเจอสัญญาณติดลิมิตในคำตอบ/ไดอะล็อก มิฉะนั้นคืน None"""
     try:
-        img_src = await img_element.get_attribute("src")
+        txt = (await page.evaluate(_LIMIT_TEXT_JS) or "").lower()
+    except Exception:
+        return None
+    for p in _LIMIT_PHRASES:
+        if p in txt:
+            idx = txt.find(p)
+            snippet = txt[max(0, idx - 20): idx + 80].replace("\n", " ").strip()
+            return snippet or p
+    return None
+
+
+async def _is_generating(page):
+    """ChatGPT แสดงปุ่ม Stop ระหว่างกำลังสร้างคำตอบ"""
+    for sel in ['button[aria-label*="Stop" i]', 'button[data-testid="stop-button"]',
+                'button[aria-label*="หยุด" i]']:
+        try:
+            if await page.locator(sel).count() > 0:
+                return True
+        except Exception:
+            pass
+    return False
+
+
+async def _snapshot_srcs(page):
+    try:
+        return await page.evaluate(_SNAPSHOT_JS)
+    except Exception:
+        return []
+
+
+async def _wait_for_result(page, baseline, on_log, timeout_s=180):
+    """
+    รอรูปใหม่ (ไม่อยู่ใน baseline) จนนิ่ง
+    คืน ("ok", info) | ("limit", message) | ("timeout", None)
+    """
+    last_src = None
+    stable = 0
+    waited = 0
+    while waited < timeout_s:
+        await asyncio.sleep(2)
+        waited += 2
+
+        limit_msg = await _check_limit(page)
+        if limit_msg:
+            return "limit", limit_msg
+
+        try:
+            info = await page.evaluate(_FIND_NEW_IMAGE_JS, baseline)
+        except Exception:
+            info = None
+        generating = await _is_generating(page)
+
+        if info and info.get("src"):
+            if info["src"] == last_src and not generating:
+                stable += 1
+                if stable >= 2:
+                    return "ok", info
+            else:
+                stable = 0
+                last_src = info["src"]
+    return "timeout", None
+
+
+async def _download_image(page, info, out_path, on_log):
+    src = info.get("src")
+    # 1) ดึงผ่าน context ของหน้า (ใช้ cookie เดียวกัน) รองรับ blob:/data:/https
+    try:
         b64 = await page.evaluate(
             """
             async (src) => {
                 const resp = await fetch(src);
                 const blob = await resp.blob();
-                return new Promise((resolve, reject) => {
+                return await new Promise((resolve, reject) => {
                     const reader = new FileReader();
                     reader.onload = () => resolve(reader.result.split(',')[1]);
                     reader.onerror = reject;
@@ -63,37 +178,56 @@ async def _download_image(page, img_element, out_path, on_log):
                 });
             }
             """,
-            img_src,
+            src,
         )
         if b64:
             with open(out_path, "wb") as f:
                 f.write(base64.b64decode(b64))
             return True
     except Exception as e:
-        on_log(f"    • download (fetch) ล้มเหลว: {e}", "info")
+        on_log(f"    • ดาวน์โหลดแบบ fetch ไม่ได้ ({e}) ลองวิธีถ่ายภาพหน้าจอ", "info")
 
+    # 2) Fallback: ถ่ายภาพเฉพาะกรอบรูป (ได้ผลเสมอ ไม่ติด CORS)
     try:
-        await img_element.hover()
-        await asyncio.sleep(0.5)
-        dl_btn = page.locator('[aria-label*="Download" i], [aria-label*="download" i], button[download]').last
-        if await dl_btn.count() > 0:
-            async with page.expect_download() as dl_info:
-                await dl_btn.click()
-            download = await dl_info.value
-            await download.save_as(out_path)
+        rect = {"x": info["x"], "y": info["y"], "width": info["w"], "height": info["h"]}
+        if rect["width"] > 5 and rect["height"] > 5:
+            await page.screenshot(path=out_path, clip=rect)
             return True
     except Exception as e:
-        on_log(f"    • download (button) ล้มเหลว: {e}", "info")
+        on_log(f"    • ถ่ายภาพหน้าจอไม่สำเร็จ: {e}", "info")
 
     return False
 
 
+async def _save_debug(page, img_path, on_log):
+    """เซฟภาพหน้าจอ + รายงานจำนวนรูปบนหน้า เมื่อหารูปผลลัพธ์ไม่เจอ"""
+    try:
+        dbg = await page.evaluate(_DEBUG_IMAGES_JS)
+        on_log(f"    • DEBUG: รูปบนหน้า={dbg['total']} | รูปใหญ่พอ(≥200px)={dbg['big']} "
+               f"| ใหญ่สุด={dbg['maxw']}x{dbg['maxh']}", "warning")
+    except Exception:
+        pass
+    try:
+        shot = os.path.join(os.path.dirname(img_path),
+                            "_debug_" + os.path.splitext(os.path.basename(img_path))[0] + ".png")
+        await page.screenshot(path=shot, full_page=True)
+        on_log(f"    • บันทึกภาพหน้าจอ debug: {os.path.basename(shot)} (ส่งให้ผู้พัฒนาดูได้)", "warning")
+    except Exception:
+        pass
+
+
 async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
+    """คืน (success, error, is_limit)"""
     filename = os.path.basename(img_path)
     try:
         target_url = custom_gpt_url.strip() if custom_gpt_url.strip() else "https://chatgpt.com"
         await page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
         await asyncio.sleep(3)
+
+        # ตรวจลิมิตก่อนเริ่ม (เผื่อโดนตั้งแต่เปิดหน้า)
+        pre_limit = await _check_limit(page)
+        if pre_limit:
+            return False, f"ติดลิมิต: {pre_limit}", True
 
         on_log(f"    • อัปโหลด: {filename}")
         attach_selectors = [
@@ -113,6 +247,9 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         file_input = page.locator('input[type="file"]').first
         await file_input.set_input_files(img_path)
         await asyncio.sleep(1.5)
+
+        # baseline หลังแนบรูป (รวมรูปที่เราอัปโหลด) ก่อนกดส่ง
+        baseline = await _snapshot_srcs(page)
         on_log("    • แนบไฟล์แล้ว กำลังส่ง prompt...")
 
         if not custom_gpt_url.strip():
@@ -130,20 +267,24 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
                 await btn.click()
                 break
 
-        on_log("    • รอ AI สร้างรูป (ไม่เกิน 2 นาที)...")
-        img_el, src = await _wait_for_generated_image(page, timeout_s=120)
-        if not img_el:
-            return False, "Timeout: ไม่มีรูปกลับมาภายใน 2 นาที"
+        on_log("    • รอ AI สร้างรูป (ไม่เกิน 3 นาที)...")
+        status, info = await _wait_for_result(page, baseline, on_log, timeout_s=180)
 
-        await asyncio.sleep(2)
-        on_log("    • ได้รูปแล้ว กำลังดาวน์โหลด...")
-        ok = await _download_image(page, img_el, out_path, on_log)
+        if status == "limit":
+            return False, f"ติดลิมิตการใช้งาน: {info}", True
+        if status == "timeout" or not info:
+            await _save_debug(page, img_path, on_log)
+            return False, "Timeout: ไม่พบรูปผลลัพธ์ใหม่ในคำตอบของ AI", False
+
+        on_log(f"    • พบรูปผลลัพธ์ ({info.get('nw')}x{info.get('nh')}) กำลังดาวน์โหลด...")
+        await asyncio.sleep(1)
+        ok = await _download_image(page, info, out_path, on_log)
         if ok:
             on_log(f"    • บันทึก: {os.path.basename(out_path)}", "success")
-            return True, ""
-        return False, "ดาวน์โหลดรูปไม่สำเร็จ"
+            return True, "", False
+        return False, "ดาวน์โหลดรูปไม่สำเร็จ", False
     except Exception as e:
-        return False, str(e)
+        return False, str(e), False
 
 
 def _default_profile_dir():
@@ -235,29 +376,37 @@ async def run_retouch(tasks, custom_gpt_url="", on_log=None, on_result=None, sho
 
         total = sum(len(v["files"]) for v in tasks.values())
         done = 0
-        cancelled = False
+        stopped = False
+        hit_limit = False
         for folder_path, info in tasks.items():
-            if cancelled:
+            if stopped:
                 break
             folder_name = os.path.basename(folder_path)
             for filename in info["files"]:
                 if should_cancel():
                     on_log("    • ได้รับคำสั่งยกเลิก หยุดการทำงาน", "warning")
-                    cancelled = True
+                    stopped = True
                     break
                 done += 1
                 img_path = os.path.join(folder_path, filename)
                 name, ext = os.path.splitext(filename)
                 out_path = os.path.join(folder_path, f"{name}_AI{ext}")
                 on_log(f"[{done}/{total}] กำลังทำ: {filename} ใน {folder_name}")
-                ok, err = await _retouch_one(page, img_path, out_path, custom_gpt_url, on_log)
+                ok, err, is_limit = await _retouch_one(page, img_path, out_path, custom_gpt_url, on_log)
                 on_result(filename, ok, err)
+                if is_limit:
+                    on_log("⛔ ติดลิมิตการใช้งาน ChatGPT — หยุดการทำงานทั้งหมด รูปที่เหลือยังไม่ถูกทำ", "error")
+                    hit_limit = True
+                    stopped = True
+                    break
                 if ok and done < total and not should_cancel():
                     on_log("    • รอ 5 วินาทีก่อนรูปถัดไป...")
                     await asyncio.sleep(5)
 
         await cleanup()
-    if not should_cancel():
+    if hit_limit:
+        on_log("หยุดเพราะติดลิมิต — ลองใหม่ภายหลังเมื่อโควต้ารีเซ็ต", "warning")
+    elif not should_cancel():
         on_log("ChatGPT retouching complete.", "success")
 
 

@@ -19,6 +19,7 @@ from datetime import datetime
 from PIL import Image, ImageTk
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
+VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
 
 # Drag and Drop support
 try:
@@ -39,7 +40,7 @@ except Exception:
 class PixUpApp:
     def __init__(self, root):
         self.root = root
-        self.version = "2.2 Beta 3"
+        self.version = "2.2 Beta 5"
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1240x960")
 
@@ -237,6 +238,12 @@ class PixUpApp:
 
     def is_image_file(self, filename):
         return filename.lower().endswith(IMAGE_EXTENSIONS)
+
+    def is_video_file(self, filename):
+        return filename.lower().endswith(VIDEO_EXTENSIONS)
+
+    def is_media_file(self, filename):
+        return self.is_image_file(filename) or self.is_video_file(filename)
 
     def current_step_key(self):
         for s in self.steps:
@@ -670,7 +677,7 @@ class PixUpApp:
             manifest = self.load_manifest()
             try:
                 all_files = [f for f in os.listdir(cam)
-                             if os.path.isfile(os.path.join(cam, f)) and self.is_image_file(f)]
+                             if os.path.isfile(os.path.join(cam, f)) and self.is_media_file(f)]
             except Exception as e:
                 self.log_threadsafe(f"อ่านโฟลเดอร์กล้องไม่ได้: {e}", "error", "E003")
                 self.set_running("phase0", False); return
@@ -878,115 +885,124 @@ class PixUpApp:
             messagebox.showerror("Error", f"เปิดรูปไม่ได้: {e}", parent=win)
             win.destroy(); self.merge_done_event.set(); return
 
-        state = [{"scale": 1.0, "cx": COMP * 0.27, "cy": COMP * 0.5},
-                 {"scale": 1.0, "cx": COMP * 0.73, "cy": COMP * 0.5}]
+        # สองกรอบครึ่งจอ (ซ้าย/ขวา) — รูปถูก "ครอป" ให้อยู่ในกรอบของตัวเองเท่านั้น เหมือนกรอบใน Canva
+        frames = [(0, 0, COMP // 2, COMP), (COMP // 2, 0, COMP // 2, COMP)]
+        # ox, oy = จุดกึ่งกลางรูป เทียบกับมุมบนซ้ายของกรอบ (พิกัด composite)
+        state = [{"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2},
+                 {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}]
         active = {"i": 0}
-        boxes = [None, None]
-        MID = COMP / 2
+        zoom_vars = [tk.DoubleVar(value=1.0), tk.DoubleVar(value=1.0)]
 
         tk.Label(win, text=f"รวมรูปต่างหู — {folder_name}", bg=self.colors["bg"], fg=self.colors["accent"],
                  font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
-        tk.Label(win, text="คลิกเลือกรูป → ลากเพื่อย้าย · ล้อเมาส์เพื่อย่อ/ขยาย",
+        tk.Label(win, text="ลากรูปในกรอบเพื่อย้าย · ใช้แถบ ZOOM ของแต่ละฝั่งเพื่อย่อ/ขยาย (ส่วนที่เกินกรอบถูกครอป)",
                  bg=self.colors["bg"], fg=self.colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
 
-        # Bottom action bar (pinned first so it never gets clipped)
         bar = tk.Frame(win, bg=self.colors["bg_alt"]); bar.pack(side="bottom", fill="x")
         barin = tk.Frame(bar, bg=self.colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-        # Control row (also bottom-pinned, above the action bar)
-        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
+        ctrl = tk.Frame(win, bg=self.colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 8))
 
         canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
                            highlightbackground=self.colors["border"], cursor="fleur")
         canvas.pack(pady=8)
 
-        def comp_size(i):
-            """ขนาดรูป i ในพิกัด composite (longest side = 900*scale)"""
-            im = base_imgs[i]
-            longest = max(10.0, 900 * state[i]["scale"])
-            bw, bh = im.size
-            if bw >= bh:
-                return longest, longest * bh / bw
-            return longest * bw / bh, longest
-
         def clamp(i):
-            """กันไม่ให้รูปข้ามเส้นกลาง และไม่ให้หลุดขอบ"""
-            cw, ch = comp_size(i)
-            hw, hh = cw / 2, ch / 2
-            if i == 0:   # ซ้าย: ขอบขวาไม่เกินเส้นกลาง
-                state[i]["cx"] = min(max(state[i]["cx"], hw), MID - hw)
-            else:        # ขวา: ขอบซ้ายไม่ต่ำกว่าเส้นกลาง
-                state[i]["cx"] = min(max(state[i]["cx"], MID + hw), COMP - hw)
-            state[i]["cy"] = min(max(state[i]["cy"], hh), COMP - hh)
+            fw, fh = frames[i][2], frames[i][3]
+            state[i]["ox"] = min(max(state[i]["ox"], 0), fw)
+            state[i]["oy"] = min(max(state[i]["oy"], 0), fh)
 
         def build(size):
             s = size / COMP
             comp = Image.new('RGB', (size, size), (255, 255, 255))
-            bxs = []
             for i, im in enumerate(base_imgs):
-                w = max(10, int(900 * state[i]["scale"] * s))
-                t = im.copy(); t.thumbnail((w, w), Image.Resampling.LANCZOS)
-                x = int(state[i]["cx"] * s - t.width / 2)
-                y = int(state[i]["cy"] * s - t.height / 2)
-                comp.paste(t, (x, y), t)
-                bxs.append((x, y, t.width, t.height))
-            return comp, bxs
+                fx, fy, fw, fh = frames[i]
+                tw, th = max(1, int(fw * s)), max(1, int(fh * s))
+                tile = Image.new('RGB', (tw, th), (255, 255, 255))
+                boxw = max(1, int(fw * state[i]["scale"] * s))
+                boxh = max(1, int(fh * state[i]["scale"] * s))
+                t = im.copy(); t.thumbnail((boxw, boxh), Image.Resampling.LANCZOS)
+                ox = int(state[i]["ox"] * s - t.width / 2)
+                oy = int(state[i]["oy"] * s - t.height / 2)
+                tile.paste(t, (ox, oy), t)  # ส่วนที่เลยขอบ tile ถูกครอปทิ้งอัตโนมัติ
+                comp.paste(tile, (int(fx * s), int(fy * s)))
+            return comp
 
         def refresh():
             clamp(0); clamp(1)
             canvas.delete("all")
-            comp, bxs = build(PV)
+            comp = build(PV)
             ph = ImageTk.PhotoImage(comp); canvas.image = ph
             canvas.create_image(0, 0, image=ph, anchor="nw")
-            # เส้นแบ่งกลาง (เฉพาะบนจอ ไม่ถูกบันทึกลงไฟล์)
-            canvas.create_line(PV / 2, 0, PV / 2, PV, fill=self.colors["highlight"], width=1, dash=(6, 4))
-            for i, b in enumerate(bxs):
-                boxes[i] = b
+            # กรอบ guide + เส้นแบ่งกลาง (เฉพาะบนจอ ไม่ถูกบันทึกลงไฟล์)
+            for i in range(2):
+                fx, fy, fw, fh = frames[i]
+                s = PV / COMP
                 color = self.colors["accent"] if i == active["i"] else self.colors["text_mute"]
-                canvas.create_rectangle(b[0], b[1], b[0] + b[2], b[1] + b[3], outline=color, width=2)
+                canvas.create_rectangle(fx * s + 1, fy * s + 1, (fx + fw) * s - 1, (fy + fh) * s - 1,
+                                        outline=color, width=2)
+            canvas.create_line(PV / 2, 0, PV / 2, PV, fill=self.colors["highlight"], width=1, dash=(6, 4))
 
         drag = {"x": 0, "y": 0}
 
         def on_press(e):
-            for i in (1, 0):
-                b = boxes[i]
-                if b and b[0] <= e.x <= b[0] + b[2] and b[1] <= e.y <= b[1] + b[3]:
-                    active["i"] = i; break
+            active["i"] = 0 if e.x < PV / 2 else 1
             drag["x"], drag["y"] = e.x, e.y
             refresh()
 
         def on_drag(e):
             f = COMP / PV
-            state[active["i"]]["cx"] += (e.x - drag["x"]) * f
-            state[active["i"]]["cy"] += (e.y - drag["y"]) * f
+            state[active["i"]]["ox"] += (e.x - drag["x"]) * f
+            state[active["i"]]["oy"] += (e.y - drag["y"]) * f
             drag["x"], drag["y"] = e.x, e.y
             refresh()
 
         def on_wheel(e):
+            i = 0 if e.x < PV / 2 else 1
+            active["i"] = i
             d = 1.1 if e.delta > 0 else 0.9
-            state[active["i"]]["scale"] = max(0.1, min(3.0, state[active["i"]]["scale"] * d))
+            state[i]["scale"] = max(0.2, min(4.0, state[i]["scale"] * d))
+            zoom_vars[i].set(round(state[i]["scale"], 2))
             refresh()
 
         canvas.bind("<Button-1>", on_press)
         canvas.bind("<B1-Motion>", on_drag)
         canvas.bind("<MouseWheel>", on_wheel)
 
-        def set_active(i):
-            active["i"] = i; refresh()
-        tk.Button(ctrl, text="◧ ปรับรูปซ้าย", command=lambda: set_active(0), bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left")
-        tk.Button(ctrl, text="ปรับรูปขวา ◨", command=lambda: set_active(1), bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(8, 0))
+        def apply_zoom(i):
+            state[i]["scale"] = max(0.2, min(4.0, zoom_vars[i].get()))
+            active["i"] = i
+            refresh()
+
+        # แถวควบคุม: ZOOM ซ้าย | ZOOM ขวา
+        zl = tk.Frame(ctrl, bg=self.colors["bg"]); zl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        tk.Label(zl, text="ZOOM ซ้าย", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Scale(zl, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[0], orient="horizontal",
+                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
+                 troughcolor=self.colors["card"], command=lambda e: apply_zoom(0)).pack(fill="x")
+        zr = tk.Frame(ctrl, bg=self.colors["bg"]); zr.pack(side="left", fill="x", expand=True, padx=(8, 8))
+        tk.Label(zr, text="ZOOM ขวา", bg=self.colors["bg"], fg=self.colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Scale(zr, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[1], orient="horizontal",
+                 bg=self.colors["bg"], fg=self.colors["text"], highlightthickness=0,
+                 troughcolor=self.colors["card"], command=lambda e: apply_zoom(1)).pack(fill="x")
 
         def swap():
             base_imgs[0], base_imgs[1] = base_imgs[1], base_imgs[0]
             state[0], state[1] = state[1], state[0]
+            zoom_vars[0].set(round(state[0]["scale"], 2)); zoom_vars[1].set(round(state[1]["scale"], 2))
             refresh()
-        tk.Button(ctrl, text="⇄ สลับซ้าย-ขวา", command=swap, bg=self.colors["btn_default"],
-                  fg=self.colors["text"], relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(8, 0))
+        tk.Button(ctrl, text="⇄ สลับ", command=swap, bg=self.colors["btn_default"], fg=self.colors["text"],
+                  relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(0, 6))
+
+        def reset():
+            for i in range(2):
+                state[i] = {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}
+                zoom_vars[i].set(1.0)
+            refresh()
+        tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=self.colors["btn_default"], fg=self.colors["text"],
+                  relief="flat", cursor="hand2", padx=10).pack(side="left")
 
         def save_and_next():
-            comp, _ = build(COMP)
-            comp.save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
+            build(COMP).save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
             win.destroy(); self.merge_done_event.set()
         tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=self.colors["success"], fg="#000",
                   font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
@@ -1145,7 +1161,7 @@ class PixUpApp:
             self.set_running("phase2", True)
             for i, folder_name in enumerate(folders):
                 base_path = os.path.join(src, folder_name)
-                files = sorted([f for f in os.listdir(base_path) if self.is_image_file(f)])
+                files = sorted([f for f in os.listdir(base_path) if self.is_media_file(f)])
                 if files:
                     self.root.after(0, lambda f=files, n=folder_name, b=base_path: self.process_rename_visual(b, f, n, b))
                 self.set_progress_threadsafe((i + 1) / len(folders) * 100)
@@ -1154,9 +1170,17 @@ class PixUpApp:
         threading.Thread(target=task, daemon=True).start()
 
     def process_rename_visual(self, work_dir, files, folder_name, base_path):
-        main_file = self.choose_main_file_visual(work_dir, files, folder_name)
+        # รูปหลักต้องเป็นรูปภาพ; วิดีโอและรูปอื่นจะถูกเปลี่ยนชื่อตามด้วย -2, -3 ...
+        images = [f for f in files if self.is_image_file(f)]
+        if images:
+            main_file = self.choose_main_file_visual(work_dir, images, folder_name)
+            if not main_file:
+                return
+        else:
+            main_file = files[0] if files else None
         if not main_file:
             return
+
         temp_dir = os.path.join(base_path, "_rename_temp")
         if os.path.exists(temp_dir):
             self.log(f"พบโฟลเดอร์ _rename_temp ของ {folder_name} อยู่แล้ว ข้ามเพื่อกันไฟล์กู้คืนถูกเขียนทับ", "error", "E007")
@@ -1164,13 +1188,15 @@ class PixUpApp:
         try:
             os.makedirs(temp_dir)
             planned_names = {}
+            ext = os.path.splitext(main_file)[1].lower()
+            planned_names[main_file] = f"{folder_name}{ext}"
             counter = 2
             for f in files:
-                ext = os.path.splitext(f)[1].lower()
-                final = f"{folder_name}{ext}" if f == main_file else f"{folder_name}-{counter}{ext}"
-                if f != main_file:
-                    counter += 1
-                planned_names[f] = final
+                if f == main_file:
+                    continue
+                e = os.path.splitext(f)[1].lower()
+                planned_names[f] = f"{folder_name}-{counter}{e}"
+                counter += 1
             for f in files:
                 shutil.move(os.path.join(base_path, f), os.path.join(temp_dir, f))
             for original, final in planned_names.items():
@@ -1179,7 +1205,7 @@ class PixUpApp:
                     os.replace(final_path, os.path.join(temp_dir, f"existing_{final}"))
                 shutil.copy2(os.path.join(temp_dir, original), final_path)
             shutil.rmtree(temp_dir)
-            self.log(f"เปลี่ยนชื่อสำเร็จ: {folder_name}", "success")
+            self.log(f"เปลี่ยนชื่อสำเร็จ: {folder_name} ({len(planned_names)} ไฟล์)", "success")
         except Exception as e:
             self.log(f"เปลี่ยนชื่อไม่สำเร็จ {folder_name}: {e}. ไฟล์กู้คืนอยู่ใน _rename_temp", "error", "E007")
 
@@ -1187,20 +1213,30 @@ class PixUpApp:
         if len(files) <= 1:
             return files[0]
         win = tk.Toplevel(self.root); win.title(f"เลือกรูปหลัก: {folder_name}")
-        win.geometry("1000x750"); win.grab_set(); win.configure(bg=self.colors["bg"])
+        win.geometry("1040x780"); win.grab_set(); win.configure(bg=self.colors["bg"])
         res = tk.StringVar()
-        tk.Label(win, text="เลือกรูปหลัก (PRIMARY PHOTO)", bg=self.colors["bg"], fg=self.colors["accent"],
-                 font=("Segoe UI", 12, "bold")).pack(pady=10)
-        can = tk.Canvas(win, bg=self.colors["bg"], highlightthickness=0); can.pack(side="left", fill="both", expand=True)
+        tk.Label(win, text=f"เลือกรูปหลัก (PRIMARY PHOTO) — โฟลเดอร์ {folder_name}", bg=self.colors["bg"],
+                 fg=self.colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=10)
+        can = tk.Canvas(win, bg=self.colors["bg"], highlightthickness=0)
+        can.pack(side="left", fill="both", expand=True, padx=10)
+        sb = ttk.Scrollbar(win, orient="vertical", command=can.yview); sb.pack(side="right", fill="y")
+        can.configure(yscrollcommand=sb.set)
         gal = tk.Frame(can, bg=self.colors["bg"]); can.create_window((0, 0), window=gal, anchor="nw")
+        gal.bind("<Configure>", lambda e: can.configure(scrollregion=can.bbox("all")))
         photo_refs = []
         for i, f in enumerate(files):
             try:
                 img = Image.open(os.path.join(folder_path, f)); img.thumbnail((160, 160))
                 ph = ImageTk.PhotoImage(img); photo_refs.append(ph)
-                lbl = tk.Label(gal, image=ph, bg=self.colors["card"], cursor="hand2")
-                lbl.grid(row=i // 5, column=i % 5, padx=8, pady=8)
-                lbl.bind("<Button-1>", lambda e, f=f: [res.set(f), win.destroy()])
+                cell = tk.Frame(gal, bg=self.colors["card"], padx=6, pady=6,
+                                highlightthickness=1, highlightbackground=self.colors["border"])
+                cell.grid(row=i // 5, column=i % 5, padx=8, pady=8)
+                lbl = tk.Label(cell, image=ph, bg=self.colors["card"], cursor="hand2"); lbl.pack()
+                name = tk.Label(cell, text=f, bg=self.colors["card"], fg=self.colors["text_dim"],
+                                font=("Consolas", 8), wraplength=160, cursor="hand2")
+                name.pack(pady=(4, 0))
+                for wdg in (lbl, name):
+                    wdg.bind("<Button-1>", lambda e, f=f: [res.set(f), win.destroy()])
             except Exception as e:
                 self.log(f"ข้ามตัวอย่าง {f}: {e}", "warning")
         self.root.wait_window(win)
@@ -1226,7 +1262,9 @@ class PixUpApp:
             folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d != "ai_retouched"]
             for i, f_n in enumerate(folders):
                 f_p = os.path.join(src, f_n)
-                files_to_copy = [f for f in os.listdir(f_p) if f.startswith(f_n) and self.is_image_file(f)]
+                # เอาเฉพาะรูปหลักรูปเดียว (ชื่อไฟล์ตรงกับรหัสโฟลเดอร์พอดี เช่น 1212.jpg ไม่เอา 1212-2.jpg)
+                files_to_copy = [f for f in os.listdir(f_p)
+                                 if self.is_image_file(f) and os.path.splitext(f)[0].lower() == f_n.lower()]
                 if not files_to_copy:
                     continue
                 p_t = self.type_mapping.get(f_n[0].upper(), "Other")

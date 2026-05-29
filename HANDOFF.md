@@ -12,6 +12,32 @@ Use this file as the shared handoff point between Codex, Gemini CLI, and human e
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-29 - Claude Code — v2.2 Beta 5 (1.5 detection ใหม่ + limit + merge sliders)
+
+Changed files: `pixup.py`, `chatgpt_retouch.py`
+
+1. **1.5 "ไม่มีรูปกลับมา" (เขียน detection ใหม่):** เดิมเดา selector ของ assistant DOM → เปลี่ยนเป็น **baseline + รูปใหม่**: เก็บ src รูปทั้งหมดก่อนกดส่ง (`_SNAPSHOT_JS`), หลังส่งหา "รูปใหม่ที่ไม่อยู่ใน baseline + ด้านสั้น ≥200px" (`_FIND_NEW_IMAGE_JS`) รอจน stream จบ (ปุ่ม Stop หาย) + นิ่ง 2 รอบ. ดาวน์โหลด: fetch→fallback `screenshot(clip=rect)`. ถ้าหาไม่เจอ เซฟ `_debug_<ชื่อ>.png` (full page) + log จำนวนรูป/ขนาดใหญ่สุด เพื่อ debug
+2. **ตรวจจับลิมิตแล้วหยุด:** `_check_limit` อ่านเฉพาะ **คำตอบล่าสุดของ assistant + dialog/alert** (ไม่อ่าน sidebar กัน false-positive จากคำ "Upgrade"), วลีลิมิตที่ไม่กำกวม. `_retouch_one` คืน `(ok, err, is_limit)`; loop หยุดทันทีเมื่อ `is_limit` + แจ้ง "⛔ ติดลิมิต หยุดทั้งหมด"
+3. **1.6 merge:** ยืนยัน frame model (Canva-style 2 กรอบ, ครอปในกรอบ ไม่ล้นกลาง) + เพิ่ม **แถบ ZOOM แยกซ้าย/ขวา + ปุ่มสลับ + รีเซ็ต** (เดิมมีแต่ wheel) — ล้อเมาส์เลือกฝั่งอัตโนมัติตามตำแหน่งเคอร์เซอร์. หมายเหตุ: อาการที่ผู้ใช้รายงาน (รูปล้นกลาง/ขยับไม่ได้) เป็นพฤติกรรม Beta 3 — แปลว่าเทสเวอร์ชันเก่า ต้องรันไฟล์ล่าสุด
+
+หมายเหตุ TCC: ระหว่าง session ที่แล้ว macOS ถอนสิทธิ์อ่านไฟล์ใน Documents กลางคัน แก้ด้วยปิด-เปิด terminal ใหม่
+
+Validation: `py_compile` + import ผ่าน. **1.5 ยังต้องทดสอบกับ ChatGPT จริง** — ถ้ายังไม่ได้รูป ให้ดูไฟล์ `_debug_*.png` + บรรทัด DEBUG ใน log
+
+### 2026-05-28 (PM-3) - Claude Code — v2.2 Beta 4 (วิดีโอ + frame merge + crop จริง + 1.5 download)
+
+Changed files: `pixup.py`, `chatgpt_retouch.py`
+
+แก้ 6 ปัญหา:
+1. **1.5 ไม่ได้รูปกลับ ("ไม่มีรูปกลับมา"):** เขียน detection ใหม่ (`_wait_for_result` + `_FIND_RESULT_JS`) หา "รูปใหญ่สุดในคำตอบล่าสุดของ assistant" (min side ≥200px) รอจน stream จบ (ปุ่ม Stop หาย) + นิ่ง 2 รอบ. ดาวน์โหลด: fetch ผ่าน context → fallback `page.screenshot(clip=rect)` (กัน CORS/blob)
+2. **1.6 preview≠ผลลัพธ์ + อยากได้กรอบแบบ Canva:** เปลี่ยนเป็น **frame model** 2 กรอบครึ่งจอ — รูปถูกครอปให้อยู่ในกรอบของตัวเอง (paste ลง tile ขนาดกรอบ ส่วนเกินถูกตัด) ลาก/ซูมภายในกรอบ, preview ใช้สูตรเดียวกับ save (s=PV vs s=COMP) จึงตรงกัน, เส้นแบ่ง+กรอบวาดบน canvas เท่านั้น (ไฟล์ที่ save ไม่มีเส้น)
+3. **Phase 2 preview ไม่โชว์ชื่อไฟล์:** เพิ่ม label ชื่อไฟล์ใต้ thumbnail + ทำ gallery ให้ scroll ได้
+4. **Phase 2 ไม่เปลี่ยนชื่อวิดีโอ:** รวมไฟล์วิดีโอเข้ากระบวนการ (รูปหลักต้องเป็นรูปภาพ, วิดีโอ+รูปอื่น → `-2,-3`)
+5. **Phase 0 ไม่ดึงวิดีโอ:** เปลี่ยน filter เป็น `is_media_file` (เพิ่ม `VIDEO_EXTENSIONS`, `is_video_file`, `is_media_file`)
+6. **Phase 3 ก๊อปทุกไฟล์:** เปลี่ยนเป็นเอาเฉพาะรูปหลัก (ชื่อไฟล์ตรงรหัสโฟลเดอร์พอดี เช่น `1212.jpg` ไม่เอา `1212-2.jpg`)
+
+Validation: `py_compile` ผ่าน, import ผ่าน, dry-run rename/phase3 logic ผ่าน (วิดีโอถูก rename, phase3 เลือก primary รูปเดียว). **ยังต้องทดสอบ GUI จริงบน Windows โดยเฉพาะ 1.5 download กับ ChatGPT จริง**
+
 ### 2026-05-28 (PM-2) - Claude Code — v2.2 Beta 2 (แก้ selector/merge/crop/browser)
 
 Changed files: `pixup.py`, `chatgpt_retouch.py`
