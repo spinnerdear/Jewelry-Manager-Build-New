@@ -13,6 +13,20 @@
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-30 (#6) - Claude Code — v2.4 (ชุดไอคอน + แก้ AI cancel + เลย์เอาต์)
+
+ต่อบน `customtkinter-ui` (ยังไม่ build — รอผู้ใช้สั่ง)
+- **ชุดไอคอนใหม่ `icons.py`:** วาดเส้นมินิมอลด้วย PIL ตอนรัน (13 ไอคอน: 7 ขั้น + folder/camera/settings/photo/reset/grid)
+  ปรับสีตามธีมได้ (cache ตาม name/สี/px), ย่อจาก 96px ให้คม. แก้ปัญหา emoji ✂️ กว้างไม่คงที่
+  ใช้แทน emoji ใน: แถบขั้นซ้าย (icon+เลข+sub), การ์ดกลาง (ไอคอนใหญ่ accent), ปุ่ม Settings/Select Folder, panel ขวา
+  (ขั้น active สลับไอคอนเป็น on_accent อัตโนมัติใน `_render_steps_state`/`_animation_loop`)
+- **แก้ AI กดหยุดแล้วข้อความค้าง:** `ai_restore_ui` เคลียร์ `is_running['ai']`/`status_var`/`count_var` เสมอ
+  + `_animation_loop` ขึ้น "กำลังยกเลิก..." เมื่อ `ai_cancel_event` set (เดิมค้าง "กำลังทำงาน")
+- **เลย์เอาต์:** window 1160→1060 (แคบลง center เล็กลง), log height 140→250 (สูงขึ้น ช่องว่างหลังขั้น 7 ลด),
+  wraplength การ์ด 540→460. หมายเหตุ: step["emoji"] เลิกใช้แล้ว (เก็บ key ไว้เฉยๆ)
+
+QA: py_compile + smoke 7 ขั้น + ไอคอน 29 cache + ai_restore เคลียร์สถานะ ผ่าน. screenshot mac เห็นไอคอนสวยคลีน
+
 ### 2026-05-30 (#5) - Claude Code — v2.4 (แก้ตามฟีดแบ็กเทส Windows)
 
 ต่อบน `customtkinter-ui` หลังผู้ใช้เทส .exe Beta 1 บน Windows (เปิดได้ ✓)
