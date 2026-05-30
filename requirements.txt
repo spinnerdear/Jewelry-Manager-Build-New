@@ -2,3 +2,4 @@ Pillow
 pyinstaller
 tkinterdnd2
 playwright
+customtkinter

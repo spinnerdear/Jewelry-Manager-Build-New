@@ -1,23 +1,57 @@
 """
-PixUp - Dialogs (ไดอะล็อก/หน้าต่างย่อยทั้งหมด)
+PixUp - Dialogs (ไดอะล็อก/หน้าต่างย่อยทั้งหมด) — CustomTkinter
 ทุกฟังก์ชันรับ (root, colors, ...) แบบ standalone ไม่พึ่ง PixUpApp
 คืนผลลัพธ์เป็นค่า Python ปกติ (None = ยกเลิก)
+หมายเหตุ: หน้ารวมรูป/ครอป ยังใช้ tk.Canvas (ตรรกะวาด/ลาก/ซูมเดิม) แค่เปลี่ยนปุ่ม/แถบเป็น ctk
 """
 import os
 import calendar as _calmod
 from datetime import date as _date
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+import customtkinter as ctk
 from PIL import Image, ImageTk
 
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
+FONT = "Segoe UI"
 
 
-# ----------------------------- Calendar picker (เลือกวันที่) -----------------------------
+def _is_image(f):
+    return f.lower().endswith(IMAGE_EXTENSIONS)
+
+
+def _toplevel(root, colors, title, geometry=None):
+    win = ctk.CTkToplevel(root); win.title(title)
+    if geometry:
+        win.geometry(geometry)
+    win.configure(fg_color=colors["bg"])
+    win.after(120, win.grab_set)
+    return win
+
+
+def _ctk_img(pil, size):
+    return ctk.CTkImage(light_image=pil, dark_image=pil, size=(int(size[0]), int(size[1])))
+
+
+def _btn(parent, text, cmd, colors, kind="default", **kw):
+    c = colors
+    if kind == "accent":
+        fg, hover, tcol = c["accent"], c["accent_hover"], c["on_accent"]
+    elif kind == "success":
+        fg, hover, tcol = c["success"], c["success"], "#08130d"
+    elif kind == "danger":
+        fg, hover, tcol = c["error"], c["error"], "#ffffff"
+    else:
+        fg, hover, tcol = c["btn_default"], c["btn_hover"], c["text"]
+    return ctk.CTkButton(parent, text=text, command=cmd, fg_color=fg, hover_color=hover,
+                         text_color=tcol, corner_radius=8, **kw)
+
+
+# ----------------------------- Calendar picker -----------------------------
 def calendar_picker(root, colors, initial=None):
-    """ปฏิทินเลือกวันที่ (ทำเองด้วย Tkinter ไม่พึ่ง lib ภายนอก) คืน 'YYYY-MM-DD' หรือ None"""
-    win = tk.Toplevel(root); win.title("เลือกวันที่")
-    win.grab_set(); win.configure(bg=colors["bg"]); win.resizable(False, False)
+    """ปฏิทินเลือกวันที่ คืน 'YYYY-MM-DD' หรือ None"""
+    win = _toplevel(root, colors, "เลือกวันที่")
+    win.resizable(False, False)
     today = _date.today()
     try:
         y, m, _d = [int(x) for x in str(initial).split("-")]
@@ -26,24 +60,22 @@ def calendar_picker(root, colors, initial=None):
         state = {"y": today.year, "m": today.month}
     result = {"val": None}
 
-    header = tk.Frame(win, bg=colors["bg"]); header.pack(fill="x", padx=12, pady=(12, 4))
+    header = ctk.CTkFrame(win, fg_color="transparent"); header.pack(fill="x", padx=14, pady=(14, 4))
     title_var = tk.StringVar()
-    tk.Button(header, text="‹", command=lambda: shift(-1), bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", font=("Segoe UI", 12, "bold"), width=3, cursor="hand2").pack(side="left")
-    tk.Label(header, textvariable=title_var, bg=colors["bg"], fg=colors["accent"],
-             font=("Segoe UI", 12, "bold"), width=18).pack(side="left", expand=True)
-    tk.Button(header, text="›", command=lambda: shift(1), bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", font=("Segoe UI", 12, "bold"), width=3, cursor="hand2").pack(side="right")
+    _btn(header, "‹", lambda: shift(-1), colors, width=36, height=32, font=(FONT, 14, "bold")).pack(side="left")
+    ctk.CTkLabel(header, textvariable=title_var, text_color=colors["accent"],
+                 font=(FONT, 13, "bold"), width=180).pack(side="left", expand=True)
+    _btn(header, "›", lambda: shift(1), colors, width=36, height=32, font=(FONT, 14, "bold")).pack(side="right")
 
-    grid = tk.Frame(win, bg=colors["bg"]); grid.pack(padx=12, pady=(0, 12))
+    grid = ctk.CTkFrame(win, fg_color="transparent"); grid.pack(padx=14, pady=(0, 14))
 
     def draw():
         for w_ in grid.winfo_children():
             w_.destroy()
         title_var.set(f"{_calmod.month_name[state['m']]} {state['y']}")
         for i, dname in enumerate(["จ", "อ", "พ", "พฤ", "ศ", "ส", "อา"]):
-            tk.Label(grid, text=dname, bg=colors["bg"], fg=colors["text_mute"],
-                     font=("Segoe UI", 8, "bold"), width=4).grid(row=0, column=i, pady=(0, 2))
+            ctk.CTkLabel(grid, text=dname, text_color=colors["text_mute"],
+                         font=(FONT, 11, "bold"), width=40).grid(row=0, column=i, pady=(0, 2))
         weeks = _calmod.Calendar(firstweekday=0).monthdayscalendar(state["y"], state["m"])
         for r, week in enumerate(weeks, start=1):
             for col, day in enumerate(week):
@@ -54,11 +86,11 @@ def calendar_picker(root, colors, initial=None):
                 def pick(dd=day):
                     result["val"] = f"{state['y']:04d}-{state['m']:02d}-{dd:02d}"
                     win.destroy()
-                tk.Button(grid, text=str(day), command=pick, width=4, relief="flat", cursor="hand2",
-                          bg=colors["accent"] if is_today else colors["card"],
-                          fg=colors["on_accent"] if is_today else colors["text"],
-                          font=("Segoe UI", 9, "bold" if is_today else "normal"),
-                          activebackground=colors["accent_hover"]).grid(row=r, column=col, padx=1, pady=1)
+                ctk.CTkButton(grid, text=str(day), command=pick, width=40, height=34, corner_radius=8,
+                              fg_color=colors["accent"] if is_today else colors["card"],
+                              hover_color=colors["accent_hover"],
+                              text_color=colors["on_accent"] if is_today else colors["text"],
+                              font=(FONT, 12)).grid(row=r, column=col, padx=2, pady=2)
 
     def shift(delta):
         m = state["m"] + delta; y = state["y"]
@@ -73,34 +105,26 @@ def calendar_picker(root, colors, initial=None):
     return result["val"]
 
 
-def _is_image(f):
-    return f.lower().endswith(IMAGE_EXTENSIONS)
-
-
-# ----------------------------- Image selector (เลือกรูปจากหลายโฟลเดอร์) -----------------------------
+# ----------------------------- Image selector -----------------------------
 def image_selector(root, colors, folder_paths, max_per_folder, title, subtitle=""):
     """ติ๊กเลือกรูปต่อโฟลเดอร์ คืน {folder_path: [files]} หรือ None ถ้ายกเลิก"""
-    win = tk.Toplevel(root); win.title(title); win.geometry("1120x860")
-    win.grab_set(); win.configure(bg=colors["bg"])
+    win = _toplevel(root, colors, title, "1120x860")
 
-    head = tk.Frame(win, bg=colors["bg"]); head.pack(fill="x", padx=20, pady=(16, 2))
-    tk.Label(head, text=title, bg=colors["bg"], fg=colors["accent"],
-             font=("Segoe UI", 14, "bold")).pack(anchor="w")
+    head = ctk.CTkFrame(win, fg_color="transparent"); head.pack(fill="x", padx=20, pady=(16, 2))
+    ctk.CTkLabel(head, text=title, text_color=colors["accent"], font=(FONT, 16, "bold")).pack(anchor="w")
     if subtitle:
-        tk.Label(head, text=subtitle, bg=colors["bg"], fg=colors["text_dim"],
-                 font=("Segoe UI", 9)).pack(anchor="w")
+        ctk.CTkLabel(head, text=subtitle, text_color=colors["text_dim"], font=(FONT, 11)).pack(anchor="w")
 
     sel = {}
-    photo_refs = {}
+    refs = []
     count_var = tk.StringVar(value="เลือกแล้ว 0 รูป")
 
     def update_count():
         count_var.set(f"เลือกแล้ว {sum(len(v) for v in sel.values())} รูป")
 
-    btns = tk.Frame(win, bg=colors["bg_alt"]); btns.pack(fill="x", side="bottom")
-    btns_in = tk.Frame(btns, bg=colors["bg_alt"]); btns_in.pack(fill="x", padx=20, pady=14)
-    tk.Label(btns_in, textvariable=count_var, bg=colors["bg_alt"], fg=colors["text"],
-             font=("Segoe UI", 10, "bold")).pack(side="left")
+    bar = ctk.CTkFrame(win, fg_color=colors["bg_alt"], corner_radius=0); bar.pack(fill="x", side="bottom")
+    barin = ctk.CTkFrame(bar, fg_color="transparent"); barin.pack(fill="x", padx=20, pady=14)
+    ctk.CTkLabel(barin, textvariable=count_var, text_color=colors["text"], font=(FONT, 12, "bold")).pack(side="left")
     confirmed = {"ok": False}
 
     def on_ok():
@@ -112,73 +136,63 @@ def image_selector(root, colors, folder_paths, max_per_folder, title, subtitle="
         sel.clear(); sel.update(final)
         win.destroy()
 
-    tk.Button(btns_in, text="ยืนยัน ✓", command=on_ok, bg=colors["accent"], fg=colors["on_accent"],
-              font=("Segoe UI", 11, "bold"), padx=28, pady=8, relief="flat", cursor="hand2").pack(side="right")
-    tk.Button(btns_in, text="ยกเลิก", command=win.destroy, bg=colors["btn_default"],
-              fg=colors["text"], relief="flat", font=("Segoe UI", 10, "bold"), padx=20, pady=8,
-              cursor="hand2").pack(side="right", padx=(0, 10))
+    _btn(barin, "ยืนยัน ✓", on_ok, colors, kind="accent", height=38, width=130,
+         font=(FONT, 13, "bold")).pack(side="right")
+    _btn(barin, "ยกเลิก", win.destroy, colors, height=38, width=100,
+         font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
-    container = tk.Frame(win, bg=colors["bg"]); container.pack(fill="both", expand=True, padx=20, pady=10)
-    canvas = tk.Canvas(container, bg=colors["bg"], highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
-    scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview); scrollbar.pack(side="right", fill="y")
-    canvas.configure(yscrollcommand=scrollbar.set)
-    scroll_f = tk.Frame(canvas, bg=colors["bg"]); canvas.create_window((0, 0), window=scroll_f, anchor="nw")
-    scroll_f.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+    scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
+    scroll.pack(fill="both", expand=True, padx=16, pady=10)
 
     for f_path in folder_paths:
         f_name = os.path.basename(f_path)
-        row = tk.Frame(scroll_f, bg=colors["card"], pady=10, padx=10,
-                       highlightthickness=1, highlightbackground=colors["border"])
+        row = ctk.CTkFrame(scroll, fg_color=colors["card"], corner_radius=10)
         row.pack(fill="x", pady=5)
-        tk.Label(row, text=f_name, bg=colors["card"], fg=colors["text_dim"],
-                 font=("Consolas", 10, "bold"), width=14, anchor="w").pack(side="left", padx=8)
-        img_container = tk.Frame(row, bg=colors["card"]); img_container.pack(side="left", fill="x", expand=True)
+        ctk.CTkLabel(row, text=f_name, text_color=colors["text_dim"], font=("Consolas", 12, "bold"),
+                     width=120, anchor="w").pack(side="left", padx=12, pady=10)
+        img_container = ctk.CTkFrame(row, fg_color="transparent"); img_container.pack(side="left", fill="x", expand=True)
         try:
             files = sorted([f for f in os.listdir(f_path) if _is_image(f)])
         except Exception:
             files = []
         sel[f_path] = []
         if not files:
-            tk.Label(img_container, text="(ไม่มีรูปในโฟลเดอร์นี้)", bg=colors["card"],
-                     fg=colors["text_mute"], font=("Segoe UI", 9)).pack(side="left", padx=8)
+            ctk.CTkLabel(img_container, text="(ไม่มีรูปในโฟลเดอร์นี้)", text_color=colors["text_mute"],
+                         font=(FONT, 11)).pack(side="left", padx=8)
         for f in files:
             try:
                 full_p = os.path.join(f_path, f)
-                img = Image.open(full_p); img.thumbnail((110, 110)); ph = ImageTk.PhotoImage(img)
-                photo_refs[full_p] = ph
-                cell = tk.Frame(img_container, bg=colors["card"]); cell.pack(side="left", padx=4)
-                lbl = tk.Label(cell, image=ph, bg=colors["card"], cursor="hand2",
-                               highlightthickness=3, highlightbackground=colors["card"])
-                lbl.pack()
-                cap = tk.Label(cell, text=f, bg=colors["card"], fg=colors["text_mute"],
-                               font=("Consolas", 7), wraplength=110)
-                cap.pack()
+                img = Image.open(full_p); img.thumbnail((104, 104))
+                cell = ctk.CTkFrame(img_container, fg_color=colors["card"], corner_radius=8,
+                                    border_width=2, border_color=colors["card"])
+                cell.pack(side="left", padx=4, pady=4)
+                cimg = _ctk_img(img, img.size); refs.append(cimg)
+                lbl = ctk.CTkLabel(cell, image=cimg, text="", cursor="hand2")
+                lbl.pack(padx=3, pady=(3, 0))
+                ctk.CTkLabel(cell, text=f, text_color=colors["text_mute"],
+                             font=("Consolas", 9), wraplength=104).pack(padx=3, pady=(0, 3))
 
-                def toggle(f_p=f_path, fn=f, b=lbl):
+                def toggle(f_p=f_path, fn=f, frame=cell):
                     if fn in sel[f_p]:
                         sel[f_p].remove(fn)
-                        b.config(relief="flat", highlightbackground=colors["card"])
+                        frame.configure(border_color=colors["card"])
                     else:
                         if max_per_folder is not None and len(sel[f_p]) >= max_per_folder:
                             messagebox.showwarning("จำกัด", f"เลือกได้สูงสุด {max_per_folder} รูป/โฟลเดอร์", parent=win)
                             return
                         sel[f_p].append(fn)
-                        b.config(relief="solid", highlightbackground=colors["accent"])
+                        frame.configure(border_color=colors["accent"])
                     update_count()
-                lbl.bind("<Button-1>", lambda e, f_p=f_path, fn=f, b=lbl: toggle(f_p, fn, b))
+                lbl.bind("<Button-1>", lambda e, fn=f, fp=f_path, fr=cell: toggle(fp, fn, fr))
             except Exception:
                 pass
 
+    win._refs = refs
     root.wait_window(win)
-    try:
-        canvas.unbind_all("<MouseWheel>")
-    except Exception:
-        pass
     return dict(sel) if confirmed["ok"] else None
 
 
-# ----------------------------- Primary chooser (เลือกรูปหลัก) -----------------------------
+# ----------------------------- Primary chooser -----------------------------
 def primary_chooser(root, colors, folder_path, files, folder_name, log=None):
     """เลือกรูปหลัก 1 รูป (ไฮไลต์ _AI). คืนชื่อไฟล์"""
     if len(files) <= 1:
@@ -188,50 +202,44 @@ def primary_chooser(root, colors, folder_path, files, folder_name, log=None):
         return os.path.splitext(f)[0].lower().endswith("_ai")
     files = sorted(files, key=lambda f: (not is_ai(f), f.lower()))
 
-    win = tk.Toplevel(root); win.title(f"เลือกรูปหลัก: {folder_name}")
-    win.geometry("1040x780"); win.grab_set(); win.configure(bg=colors["bg"])
+    win = _toplevel(root, colors, f"เลือกรูปหลัก: {folder_name}", "1040x800")
     res = tk.StringVar()
-    tk.Label(win, text=f"เลือกรูปหลัก (PRIMARY) — โฟลเดอร์ {folder_name}", bg=colors["bg"],
-             fg=colors["accent"], font=("Segoe UI", 12, "bold")).pack(pady=(10, 0))
-    tk.Label(win, text="รูปกรอบเขียว = ผ่าน AI แล้ว (แนะนำให้เลือกเป็นรูปหลัก)",
-             bg=colors["bg"], fg=colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 8))
-    can = tk.Canvas(win, bg=colors["bg"], highlightthickness=0)
-    can.pack(side="left", fill="both", expand=True, padx=10)
-    sb = ttk.Scrollbar(win, orient="vertical", command=can.yview); sb.pack(side="right", fill="y")
-    can.configure(yscrollcommand=sb.set)
-    gal = tk.Frame(can, bg=colors["bg"]); can.create_window((0, 0), window=gal, anchor="nw")
-    gal.bind("<Configure>", lambda e: can.configure(scrollregion=can.bbox("all")))
-    photo_refs = []
+    ctk.CTkLabel(win, text=f"เลือกรูปหลัก (PRIMARY) — โฟลเดอร์ {folder_name}", text_color=colors["accent"],
+                 font=(FONT, 14, "bold")).pack(pady=(12, 0))
+    ctk.CTkLabel(win, text="รูปกรอบเทอร์คอยซ์ = ผ่าน AI แล้ว (แนะนำให้เลือกเป็นรูปหลัก)",
+                 text_color=colors["text_dim"], font=(FONT, 11)).pack(pady=(0, 8))
+    gal = ctk.CTkScrollableFrame(win, fg_color="transparent")
+    gal.pack(fill="both", expand=True, padx=12, pady=8)
+    refs = []
     for i, f in enumerate(files):
         try:
-            img = Image.open(os.path.join(folder_path, f)); img.thumbnail((160, 160))
-            ph = ImageTk.PhotoImage(img); photo_refs.append(ph)
+            img = Image.open(os.path.join(folder_path, f)); img.thumbnail((158, 158))
             ai = is_ai(f)
             border = colors["accent"] if ai else colors["border"]
-            cell = tk.Frame(gal, bg=colors["card"], padx=6, pady=6,
-                            highlightthickness=2 if ai else 1, highlightbackground=border, highlightcolor=border)
+            cell = ctk.CTkFrame(gal, fg_color=colors["card"], corner_radius=10,
+                                border_width=2 if ai else 1, border_color=border)
             cell.grid(row=i // 5, column=i % 5, padx=8, pady=8)
             if ai:
-                tk.Label(cell, text="✨ AI", bg=colors["accent"], fg=colors["on_accent"],
-                         font=("Segoe UI", 8, "bold")).pack(anchor="w")
-            lbl = tk.Label(cell, image=ph, bg=colors["card"], cursor="hand2"); lbl.pack()
-            name = tk.Label(cell, text=f, bg=colors["card"],
-                            fg=colors["accent"] if ai else colors["text_dim"],
-                            font=("Consolas", 8, "bold" if ai else "normal"), wraplength=160, cursor="hand2")
-            name.pack(pady=(4, 0))
+                ctk.CTkLabel(cell, text="✨ AI", fg_color=colors["accent"], text_color=colors["on_accent"],
+                             font=(FONT, 10, "bold"), corner_radius=5).pack(anchor="w", padx=6, pady=(6, 0))
+            cimg = _ctk_img(img, img.size); refs.append(cimg)
+            lbl = ctk.CTkLabel(cell, image=cimg, text="", cursor="hand2"); lbl.pack(padx=6, pady=6)
+            name = ctk.CTkLabel(cell, text=f, text_color=colors["accent"] if ai else colors["text_dim"],
+                                font=("Consolas", 10, "bold" if ai else "normal"), wraplength=158, cursor="hand2")
+            name.pack(padx=6, pady=(0, 6))
             for wdg in (lbl, name):
                 wdg.bind("<Button-1>", lambda e, f=f: [res.set(f), win.destroy()])
         except Exception as e:
             if log:
                 log(f"ข้ามตัวอย่าง {f}: {e}", "warning")
+    win._refs = refs
     root.wait_window(win)
     return res.get() if res.get() else files[0]
 
 
-# ----------------------------- Merge editor (รวมรูปต่างหู 2 กรอบ) -----------------------------
+# ----------------------------- Merge editor (คง tk.Canvas) -----------------------------
 def merge_editor(root, colors, ai_paths, out_dir, folder_name, current, total, done_event):
-    win = tk.Toplevel(root); win.title(f"MERGE: {folder_name} ({current}/{total})")
-    win.geometry("860x880"); win.grab_set(); win.configure(bg=colors["bg"])
+    win = _toplevel(root, colors, f"MERGE: {folder_name} ({current}/{total})", "860x900")
     COMP, PV = 2000, 640
 
     try:
@@ -246,14 +254,14 @@ def merge_editor(root, colors, ai_paths, out_dir, folder_name, current, total, d
     active = {"i": 0}
     zoom_vars = [tk.DoubleVar(value=1.0), tk.DoubleVar(value=1.0)]
 
-    tk.Label(win, text=f"รวมรูปต่างหู — {folder_name}  ({current}/{total})", bg=colors["bg"],
-             fg=colors["accent"], font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
-    tk.Label(win, text="ลากรูปในกรอบเพื่อย้าย · แถบ ZOOM ของแต่ละฝั่งเพื่อย่อ/ขยาย (ส่วนเกินกรอบถูกครอป)",
-             bg=colors["bg"], fg=colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
+    ctk.CTkLabel(win, text=f"รวมรูปต่างหู — {folder_name}  ({current}/{total})", text_color=colors["accent"],
+                 font=(FONT, 14, "bold")).pack(pady=(12, 0))
+    ctk.CTkLabel(win, text="ลากรูปในกรอบเพื่อย้าย · แถบ ZOOM แต่ละฝั่งเพื่อย่อ/ขยาย (ส่วนเกินกรอบถูกครอป)",
+                 text_color=colors["text_dim"], font=(FONT, 11)).pack(pady=(0, 6))
 
-    bar = tk.Frame(win, bg=colors["bg_alt"]); bar.pack(side="bottom", fill="x")
-    barin = tk.Frame(bar, bg=colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-    ctrl = tk.Frame(win, bg=colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 8))
+    bar = ctk.CTkFrame(win, fg_color=colors["bg_alt"], corner_radius=0); bar.pack(side="bottom", fill="x")
+    barin = ctk.CTkFrame(bar, fg_color="transparent"); barin.pack(fill="x", padx=20, pady=12)
+    ctrl = ctk.CTkFrame(win, fg_color="transparent"); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 8))
 
     canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
                        highlightbackground=colors["border"], cursor="fleur")
@@ -325,50 +333,44 @@ def merge_editor(root, colors, ai_paths, out_dir, folder_name, current, total, d
         active["i"] = i
         refresh()
 
-    zl = tk.Frame(ctrl, bg=colors["bg"]); zl.pack(side="left", fill="x", expand=True, padx=(0, 8))
-    tk.Label(zl, text="ZOOM ซ้าย", bg=colors["bg"], fg=colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
-    tk.Scale(zl, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[0], orient="horizontal",
-             bg=colors["bg"], fg=colors["text"], highlightthickness=0, troughcolor=colors["card"],
-             command=lambda e: apply_zoom(0)).pack(fill="x")
-    zr = tk.Frame(ctrl, bg=colors["bg"]); zr.pack(side="left", fill="x", expand=True, padx=(8, 8))
-    tk.Label(zr, text="ZOOM ขวา", bg=colors["bg"], fg=colors["text"], font=("Segoe UI", 8)).pack(anchor="w")
-    tk.Scale(zr, from_=0.2, to=4.0, resolution=0.05, variable=zoom_vars[1], orient="horizontal",
-             bg=colors["bg"], fg=colors["text"], highlightthickness=0, troughcolor=colors["card"],
-             command=lambda e: apply_zoom(1)).pack(fill="x")
+    zl = ctk.CTkFrame(ctrl, fg_color="transparent"); zl.pack(side="left", fill="x", expand=True, padx=(0, 8))
+    ctk.CTkLabel(zl, text="ZOOM ซ้าย", text_color=colors["text"], font=(FONT, 11)).pack(anchor="w")
+    ctk.CTkSlider(zl, from_=0.2, to=4.0, variable=zoom_vars[0], command=lambda v: apply_zoom(0),
+                  progress_color=colors["accent"], button_color=colors["accent"]).pack(fill="x")
+    zr = ctk.CTkFrame(ctrl, fg_color="transparent"); zr.pack(side="left", fill="x", expand=True, padx=(8, 8))
+    ctk.CTkLabel(zr, text="ZOOM ขวา", text_color=colors["text"], font=(FONT, 11)).pack(anchor="w")
+    ctk.CTkSlider(zr, from_=0.2, to=4.0, variable=zoom_vars[1], command=lambda v: apply_zoom(1),
+                  progress_color=colors["accent"], button_color=colors["accent"]).pack(fill="x")
 
     def swap():
         base_imgs[0], base_imgs[1] = base_imgs[1], base_imgs[0]
         state[0], state[1] = state[1], state[0]
         zoom_vars[0].set(round(state[0]["scale"], 2)); zoom_vars[1].set(round(state[1]["scale"], 2))
         refresh()
-    tk.Button(ctrl, text="⇄ สลับ", command=swap, bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(0, 6))
+    _btn(ctrl, "⇄ สลับ", swap, colors, width=80, height=30).pack(side="left", padx=(0, 6))
 
     def reset():
         for i in range(2):
             state[i] = {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}
             zoom_vars[i].set(1.0)
         refresh()
-    tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", cursor="hand2", padx=10).pack(side="left")
+    _btn(ctrl, "รีเซ็ต", reset, colors, width=80, height=30).pack(side="left")
 
     def save_and_next():
         build(COMP).save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
         win.destroy(); done_event.set()
-    tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=colors["success"], fg="#08130d",
-              font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
-    tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), done_event.set()],
-              bg=colors["btn_default"], fg=colors["text"], relief="flat",
-              font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
+    _btn(barin, "บันทึก & ถัดไป →", save_and_next, colors, kind="success", height=40,
+         font=(FONT, 13, "bold")).pack(side="right")
+    _btn(barin, "ข้าม", lambda: [win.destroy(), done_event.set()], colors, height=40,
+         width=90, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), done_event.set()])
     refresh()
 
 
-# ----------------------------- Crop editor (ครอบตัด cover) -----------------------------
+# ----------------------------- Crop editor (คง tk.Canvas) -----------------------------
 def crop_editor(root, colors, img_path, out_dir, filename, current, total, done_event):
-    win = tk.Toplevel(root); win.title(f"CROP: {filename} ({current}/{total})")
-    win.geometry("860x880"); win.grab_set(); win.configure(bg=colors["bg"])
+    win = _toplevel(root, colors, f"CROP: {filename} ({current}/{total})", "860x900")
     COMP, PV = 2000, 640
 
     try:
@@ -381,14 +383,14 @@ def crop_editor(root, colors, img_path, out_dir, filename, current, total, done_
     scale_var = tk.DoubleVar(value=1.0)
     bw, bh = base.size
 
-    tk.Label(win, text=f"ครอบตัด & จัดตำแหน่ง — {filename}  ({current}/{total})", bg=colors["bg"],
-             fg=colors["accent"], font=("Segoe UI", 13, "bold")).pack(pady=(12, 0))
-    tk.Label(win, text="ลากเพื่อย้ายรูป · ล้อเมาส์หรือแถบเลื่อนเพื่อซูมเข้า/ออก",
-             bg=colors["bg"], fg=colors["text_dim"], font=("Segoe UI", 9)).pack(pady=(0, 6))
+    ctk.CTkLabel(win, text=f"ครอบตัด & จัดตำแหน่ง — {filename}  ({current}/{total})", text_color=colors["accent"],
+                 font=(FONT, 14, "bold")).pack(pady=(12, 0))
+    ctk.CTkLabel(win, text="ลากเพื่อย้ายรูป · ล้อเมาส์หรือแถบเลื่อนเพื่อซูมเข้า/ออก",
+                 text_color=colors["text_dim"], font=(FONT, 11)).pack(pady=(0, 6))
 
-    bar = tk.Frame(win, bg=colors["bg_alt"]); bar.pack(side="bottom", fill="x")
-    barin = tk.Frame(bar, bg=colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-    ctrl = tk.Frame(win, bg=colors["bg"]); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
+    bar = ctk.CTkFrame(win, fg_color=colors["bg_alt"], corner_radius=0); bar.pack(side="bottom", fill="x")
+    barin = ctk.CTkFrame(bar, fg_color="transparent"); barin.pack(fill="x", padx=20, pady=12)
+    ctrl = ctk.CTkFrame(win, fg_color="transparent"); ctrl.pack(side="bottom", fill="x", padx=20, pady=(0, 6))
 
     canvas = tk.Canvas(win, width=PV, height=PV, bg="white", highlightthickness=1,
                        highlightbackground=colors["border"], cursor="fleur")
@@ -437,36 +439,30 @@ def crop_editor(root, colors, img_path, out_dir, filename, current, total, done_
     canvas.bind("<B1-Motion>", on_drag)
     canvas.bind("<MouseWheel>", on_wheel)
 
-    tk.Label(ctrl, text="ZOOM", bg=colors["bg"], fg=colors["text"], width=6, anchor="w").pack(side="left")
-    tk.Scale(ctrl, from_=0.1, to=3.0, resolution=0.05, variable=scale_var, orient="horizontal",
-             bg=colors["bg"], fg=colors["text"], highlightthickness=0, troughcolor=colors["card"],
-             command=lambda e: apply_scale(scale_var.get())).pack(side="left", fill="x", expand=True)
-
-    def reset():
-        st["scale"] = 1.0; st["cx"] = COMP / 2; st["cy"] = COMP / 2
-        scale_var.set(1.0); refresh()
-    tk.Button(ctrl, text="รีเซ็ต", command=reset, bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", cursor="hand2", padx=10).pack(side="left", padx=(10, 0))
+    ctk.CTkLabel(ctrl, text="ZOOM", text_color=colors["text"], width=50).pack(side="left")
+    ctk.CTkSlider(ctrl, from_=0.1, to=3.0, variable=scale_var, command=lambda v: apply_scale(scale_var.get()),
+                  progress_color=colors["accent"], button_color=colors["accent"]).pack(side="left", fill="x", expand=True)
+    _btn(ctrl, "รีเซ็ต", lambda: (st.update({"scale": 1.0, "cx": COMP / 2, "cy": COMP / 2}),
+                                  scale_var.set(1.0), refresh()), colors,
+         width=80, height=30).pack(side="left", padx=(10, 0))
 
     def save_and_next():
         build(COMP).save(img_path, "JPEG", quality=95, optimize=True)
         win.destroy(); done_event.set()
-    tk.Button(barin, text="บันทึก & ถัดไป →", command=save_and_next, bg=colors["success"], fg="#08130d",
-              font=("Segoe UI", 12, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
-    tk.Button(barin, text="ข้าม", command=lambda: [win.destroy(), done_event.set()],
-              bg=colors["btn_default"], fg=colors["text"], relief="flat",
-              font=("Segoe UI", 10, "bold"), padx=18, pady=8, cursor="hand2").pack(side="right", padx=(0, 10))
+    _btn(barin, "บันทึก & ถัดไป →", save_and_next, colors, kind="success", height=40,
+         font=(FONT, 13, "bold")).pack(side="right")
+    _btn(barin, "ข้าม", lambda: [win.destroy(), done_event.set()], colors, height=40,
+         width=90, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), done_event.set()])
     refresh()
 
 
-# ----------------------------- Collect preview (ขั้นเก็บเข้าฐานข้อมูล — ทีละสินค้า) -----------------------------
+# ----------------------------- Collect preview (ทีละสินค้า) -----------------------------
 def collect_preview(root, colors, plan):
-    """พรีวิวทีละสินค้า: รูปต้นทาง + รูปปลายทางเดิม P1/P2 + เลือกแทน/ไม่แทน/ข้าม
+    """พรีวิวทีละสินค้า: รูปต้นทาง + ปลายทางเดิม P1/P2 + เลือกแทน/ไม่แทน/ข้าม
     คืน {'allow_new': bool, 'decisions': {folder: 'replace'|'skip_dup'|'skip'}} หรือ None"""
-    win = tk.Toplevel(root); win.title("ตรวจสอบก่อนเก็บเข้าฐานข้อมูล")
-    win.geometry("920x780"); win.grab_set(); win.configure(bg=colors["bg"])
+    win = _toplevel(root, colors, "ตรวจสอบก่อนเก็บเข้าฐานข้อมูล", "940x800")
     status_label = {"exists": ("✓ มีหมวดอยู่แล้ว", colors["success"]),
                     "nearest": ("≈ ช่วงใกล้เคียง", colors["highlight"]),
                     "new": ("+ สร้างช่วงใหม่", colors["warning"]),
@@ -478,54 +474,46 @@ def collect_preview(root, colors, plan):
     confirmed = {"ok": False}
     win._refs = []
 
-    tk.Label(win, text="ตรวจสอบรูปหลัก & ปลายทางก่อนคัดลอก (ทีละสินค้า)", bg=colors["bg"],
-             fg=colors["accent"], font=("Segoe UI", 14, "bold")).pack(pady=(14, 2))
+    ctk.CTkLabel(win, text="ตรวจสอบรูปหลัก & ปลายทางก่อนคัดลอก (ทีละสินค้า)", text_color=colors["accent"],
+                 font=(FONT, 15, "bold")).pack(pady=(14, 2))
     counter_var = tk.StringVar()
-    tk.Label(win, textvariable=counter_var, bg=colors["bg"], fg=colors["text_dim"],
-             font=("Segoe UI", 10, "bold")).pack(pady=(0, 6))
+    ctk.CTkLabel(win, textvariable=counter_var, text_color=colors["text_dim"],
+                 font=(FONT, 12, "bold")).pack(pady=(0, 6))
 
-    # แถบล่าง (อยู่ล่างสุดเสมอ)
-    bar = tk.Frame(win, bg=colors["bg_alt"]); bar.pack(side="bottom", fill="x")
-    barin = tk.Frame(bar, bg=colors["bg_alt"]); barin.pack(fill="x", padx=20, pady=12)
-    tk.Checkbutton(barin, text="อนุญาตให้สร้างโฟลเดอร์ช่วงใหม่ (+)", variable=allow_new,
-                   bg=colors["bg_alt"], fg=colors["text"], selectcolor=colors["card"],
-                   activebackground=colors["bg_alt"], font=("Segoe UI", 9)).pack(side="left")
+    bar = ctk.CTkFrame(win, fg_color=colors["bg_alt"], corner_radius=0); bar.pack(side="bottom", fill="x")
+    barin = ctk.CTkFrame(bar, fg_color="transparent"); barin.pack(fill="x", padx=20, pady=12)
+    ctk.CTkCheckBox(barin, text="อนุญาตให้สร้างโฟลเดอร์ช่วงใหม่ (+)", variable=allow_new,
+                    onvalue=True, offvalue=False, fg_color=colors["accent"], hover_color=colors["accent_hover"],
+                    font=(FONT, 12)).pack(side="left")
 
     def ok():
         confirmed["ok"] = True; win.destroy()
-    tk.Button(barin, text="ยืนยันคัดลอกทั้งหมด →", command=ok, bg=colors["accent"], fg=colors["on_accent"],
-              font=("Segoe UI", 11, "bold"), padx=24, pady=8, relief="flat", cursor="hand2").pack(side="right")
-    tk.Button(barin, text="ยกเลิก", command=win.destroy, bg=colors["btn_default"],
-              fg=colors["text"], relief="flat", font=("Segoe UI", 10, "bold"), padx=18, pady=8,
-              cursor="hand2").pack(side="right", padx=(0, 10))
+    _btn(barin, "ยืนยันคัดลอกทั้งหมด →", ok, colors, kind="accent", height=40,
+         font=(FONT, 13, "bold")).pack(side="right")
+    _btn(barin, "ยกเลิก", win.destroy, colors, height=40, width=90,
+         font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
-    detail = tk.Frame(win, bg=colors["bg"]); detail.pack(fill="both", expand=True, padx=16, pady=8)
-
-    def _thumb(path, size=(190, 190)):
-        try:
-            img = Image.open(path); img.thumbnail(size); ph = ImageTk.PhotoImage(img)
-            win._refs.append(ph); return ph
-        except Exception:
-            return None
+    detail = ctk.CTkFrame(win, fg_color="transparent"); detail.pack(fill="both", expand=True, padx=16, pady=8)
 
     def _col(parent, title, img_path, status_txt=None, status_color=None, rel=None):
-        f = tk.Frame(parent, bg=colors["card"], padx=12, pady=12, width=250,
-                     highlightthickness=1, highlightbackground=colors["border"])
+        f = ctk.CTkFrame(parent, fg_color=colors["card"], corner_radius=12, width=260, height=320)
         f.pack_propagate(False)
-        tk.Label(f, text=title, bg=colors["card"], fg=colors["text_dim"],
-                 font=("Segoe UI", 9, "bold")).pack()
-        ph = _thumb(img_path) if img_path else None
-        if ph:
-            tk.Label(f, image=ph, bg=colors["card"]).pack(pady=8)
+        ctk.CTkLabel(f, text=title, text_color=colors["text_dim"], font=(FONT, 12, "bold")).pack(pady=(12, 4))
+        if img_path:
+            try:
+                img = Image.open(img_path); img.thumbnail((200, 200))
+                cimg = _ctk_img(img, img.size); win._refs.append(cimg)
+                ctk.CTkLabel(f, image=cimg, text="").pack(pady=6)
+            except Exception:
+                ctk.CTkLabel(f, text="(เปิดรูปไม่ได้)", text_color=colors["text_mute"]).pack(pady=40)
         else:
-            tk.Label(f, text="— ยังไม่มีรูปปลายทาง —\n(จะสร้างใหม่)", bg=colors["card"],
-                     fg=colors["text_mute"], font=("Segoe UI", 9), height=9).pack(pady=8)
+            ctk.CTkLabel(f, text="— ยังไม่มีรูปปลายทาง —\n(จะสร้างใหม่)", text_color=colors["text_mute"],
+                         font=(FONT, 12)).pack(pady=60)
         if status_txt:
-            tk.Label(f, text=status_txt, bg=colors["card"], fg=status_color,
-                     font=("Segoe UI", 9, "bold")).pack()
+            ctk.CTkLabel(f, text=status_txt, text_color=status_color, font=(FONT, 12, "bold")).pack()
         if rel:
-            tk.Label(f, text=rel, bg=colors["card"], fg=colors["text_dim"],
-                     font=("Consolas", 8), wraplength=220).pack()
+            ctk.CTkLabel(f, text=rel, text_color=colors["text_dim"], font=("Consolas", 10),
+                         wraplength=230).pack(pady=(2, 0))
         return f
 
     def render():
@@ -535,33 +523,30 @@ def collect_preview(root, colors, plan):
         item = plan[idx["i"]]
         counter_var.set(f"สินค้า {idx['i'] + 1} / {n}   ·   {item['file']}")
 
-        cols = tk.Frame(detail, bg=colors["bg"]); cols.pack()
+        cols = ctk.CTkFrame(detail, fg_color="transparent"); cols.pack()
         _col(cols, "📷 รูปต้นทาง (จะคัดลอก)", item["fpath"]).grid(row=0, column=0, padx=8)
         for c_i, key, lbl in ((1, "p1", "🗄 ปลายทาง P1 (ของเดิม)"), (2, "p2", "🗄 ปลายทาง P2 (ของเดิม)")):
             _t, rel, status = item[key]
             txt, color = status_label.get(status, (status, colors["text_dim"]))
             _col(cols, lbl, item[f"{key}_existing"], txt, color, rel).grid(row=0, column=c_i, padx=8)
 
-        act = tk.Frame(detail, bg=colors["bg"]); act.pack(pady=(14, 0), anchor="w", padx=8)
-        tk.Label(act, text="ทำอย่างไรกับสินค้านี้:", bg=colors["bg"], fg=colors["text"],
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+        act = ctk.CTkFrame(detail, fg_color="transparent"); act.pack(pady=(14, 0), anchor="w", padx=8)
+        ctk.CTkLabel(act, text="ทำอย่างไรกับสินค้านี้:", text_color=colors["text"],
+                     font=(FONT, 13, "bold")).pack(anchor="w", pady=(0, 4))
         var = decisions[item["folder"]]
         for val, label in (("replace", "✓ แทนที่ — คัดลอกทับของเดิม (ถ้ามี)"),
                            ("skip_dup", "↷ ไม่แทนของเดิม — ข้ามเฉพาะปลายทางที่มีไฟล์ซ้ำ แต่ยังสร้างที่ยังไม่มี"),
                            ("skip", "✖ ข้ามสินค้านี้ — ไม่คัดลอกเลย")):
-            tk.Radiobutton(act, text=label, variable=var, value=val, bg=colors["bg"], fg=colors["text"],
-                           selectcolor=colors["input_bg"], activebackground=colors["bg"],
-                           font=("Segoe UI", 9), anchor="w").pack(anchor="w")
+            ctk.CTkRadioButton(act, text=label, variable=var, value=val, fg_color=colors["accent"],
+                               hover_color=colors["accent_hover"], font=(FONT, 12)).pack(anchor="w", pady=2)
 
-        nav = tk.Frame(detail, bg=colors["bg"]); nav.pack(fill="x", pady=(16, 0))
+        nav = ctk.CTkFrame(detail, fg_color="transparent"); nav.pack(fill="x", pady=(16, 0))
         if idx["i"] > 0:
-            tk.Button(nav, text="‹ ก่อนหน้า", command=lambda: go(-1), bg=colors["btn_default"],
-                      fg=colors["text"], relief="flat", font=("Segoe UI", 10, "bold"),
-                      padx=16, pady=6, cursor="hand2").pack(side="left")
+            _btn(nav, "‹ ก่อนหน้า", lambda: go(-1), colors, height=34, width=110,
+                 font=(FONT, 12, "bold")).pack(side="left")
         if idx["i"] < n - 1:
-            tk.Button(nav, text="ถัดไป ›", command=lambda: go(1), bg=colors["btn_default"],
-                      fg=colors["text"], relief="flat", font=("Segoe UI", 10, "bold"),
-                      padx=16, pady=6, cursor="hand2").pack(side="right")
+            _btn(nav, "ถัดไป ›", lambda: go(1), colors, height=34, width=110,
+                 font=(FONT, 12, "bold")).pack(side="right")
 
     def go(d):
         idx["i"] = max(0, min(n - 1, idx["i"] + d)); render()
@@ -573,58 +558,51 @@ def collect_preview(root, colors, plan):
             if confirmed["ok"] else None)
 
 
-# ----------------------------- Import options (โหมดนำเข้า) -----------------------------
+# ----------------------------- Import options -----------------------------
 def import_options(root, colors):
     """เลือกโหมดนำเข้า คืน dict {mode, date_from, date_to, codes} หรือ None"""
-    win = tk.Toplevel(root); win.title("ตัวเลือกการนำเข้า")
-    win.geometry("520x520"); win.grab_set(); win.configure(bg=colors["bg"])
-    tk.Label(win, text="📥 ตัวเลือกการนำเข้ารูป", bg=colors["bg"], fg=colors["accent"],
-             font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=24, pady=(20, 4))
+    win = _toplevel(root, colors, "ตัวเลือกการนำเข้า", "560x600")
+    ctk.CTkLabel(win, text="📥  ตัวเลือกการนำเข้ารูป", text_color=colors["accent"],
+                 font=(FONT, 16, "bold")).pack(anchor="w", padx=24, pady=(20, 6))
 
     mode = tk.StringVar(value="new")
     opts = [
         ("new", "ดึงเฉพาะรูปใหม่ (จำที่เคยดึงแล้ว)", "แนะนำ — ดึงเฉพาะไฟล์ที่ยังไม่เคยนำเข้า"),
         ("all", "ดึงทั้งหมด (ไม่สนความจำ)", "ดึงทุกไฟล์ในโฟลเดอร์กล้อง รวมที่เคยดึงแล้ว"),
         ("date", "ดึงตามช่วงวันที่", "เฉพาะไฟล์ที่แก้ไขในช่วงวันที่ที่ระบุ"),
-        ("codes", "ดึงเฉพาะรหัสที่ระบุ", "พิมพ์รหัส 4 หลัก คั่นด้วยจุลภาค (ดึงซ้ำได้)"),
+        ("codes", "ดึงเฉพาะรหัสที่ระบุ", "พิมพ์เลข 4 หลัก (หลายแบบ — ดูช่องด้านล่าง)"),
     ]
-    body = tk.Frame(win, bg=colors["bg"]); body.pack(fill="x", padx=24, pady=6)
+    body = ctk.CTkFrame(win, fg_color="transparent"); body.pack(fill="x", padx=22, pady=6)
     for val, title, desc in opts:
-        cell = tk.Frame(body, bg=colors["card"], padx=12, pady=8,
-                        highlightthickness=1, highlightbackground=colors["border"])
-        cell.pack(fill="x", pady=4)
-        tk.Radiobutton(cell, text=title, variable=mode, value=val, bg=colors["card"], fg=colors["text"],
-                       selectcolor=colors["input_bg"], activebackground=colors["card"],
-                       font=("Segoe UI", 10, "bold"), anchor="w").pack(anchor="w", fill="x")
-        tk.Label(cell, text=desc, bg=colors["card"], fg=colors["text_dim"],
-                 font=("Segoe UI", 8)).pack(anchor="w", padx=24)
+        cell = ctk.CTkFrame(body, fg_color=colors["card"], corner_radius=10); cell.pack(fill="x", pady=4)
+        ctk.CTkRadioButton(cell, text=title, variable=mode, value=val, fg_color=colors["accent"],
+                           hover_color=colors["accent_hover"], font=(FONT, 13, "bold")).pack(anchor="w", padx=12, pady=(10, 2))
+        ctk.CTkLabel(cell, text=desc, text_color=colors["text_dim"], font=(FONT, 11)).pack(anchor="w", padx=40, pady=(0, 10))
 
-    extra = tk.Frame(win, bg=colors["bg"]); extra.pack(fill="x", padx=24, pady=(4, 0))
-    tk.Label(extra, text="ช่วงวันที่ (กดปุ่ม 📅 เลือกจากปฏิทิน หรือพิมพ์ YYYY-MM-DD):", bg=colors["bg"],
-             fg=colors["text_dim"], font=("Segoe UI", 8)).pack(anchor="w")
-    drow = tk.Frame(extra, bg=colors["bg"]); drow.pack(fill="x")
+    extra = ctk.CTkFrame(win, fg_color="transparent"); extra.pack(fill="x", padx=24, pady=(4, 0))
+    ctk.CTkLabel(extra, text="ช่วงวันที่ (กดปุ่ม 📅 หรือพิมพ์ YYYY-MM-DD):", text_color=colors["text_dim"],
+                 font=(FONT, 11)).pack(anchor="w")
+    drow = ctk.CTkFrame(extra, fg_color="transparent"); drow.pack(fill="x", pady=(2, 0))
     date_from = tk.StringVar(); date_to = tk.StringVar()
 
     def add_date_field(var):
-        e = tk.Entry(drow, textvariable=var, width=12, bg=colors["input_bg"], fg=colors["text"],
-                     relief="flat", insertbackground="white")
-        e.pack(side="left", ipady=4)
+        ctk.CTkEntry(drow, textvariable=var, width=120, font=("Consolas", 12),
+                     fg_color=colors["input_bg"], border_width=0).pack(side="left")
 
         def pick():
             v = calendar_picker(win, colors, var.get().strip() or None)
             if v:
                 var.set(v)
-        tk.Button(drow, text="📅", command=pick, bg=colors["btn_default"], fg=colors["text"],
-                  relief="flat", cursor="hand2", width=3).pack(side="left", padx=(2, 0))
+        _btn(drow, "📅", pick, colors, width=40, height=30).pack(side="left", padx=(4, 0))
 
     add_date_field(date_from)
-    tk.Label(drow, text="  ถึง  ", bg=colors["bg"], fg=colors["text_dim"]).pack(side="left")
+    ctk.CTkLabel(drow, text="  ถึง  ", text_color=colors["text_dim"]).pack(side="left")
     add_date_field(date_to)
-    tk.Label(extra, text="รหัสที่ต้องการ (เช่น 1212,0789 · 1000 1001 · 1000-1005 · ปนกันได้):", bg=colors["bg"],
-             fg=colors["text_dim"], font=("Segoe UI", 8)).pack(anchor="w", pady=(8, 0))
+    ctk.CTkLabel(extra, text="รหัส (เช่น 1212,0789 · 1000 1001 · 1000-1005 · ปนกันได้):", text_color=colors["text_dim"],
+                 font=(FONT, 11)).pack(anchor="w", pady=(8, 0))
     codes = tk.StringVar()
-    tk.Entry(extra, textvariable=codes, bg=colors["input_bg"], fg=colors["text"],
-             relief="flat", insertbackground="white").pack(fill="x", ipady=4)
+    ctk.CTkEntry(extra, textvariable=codes, font=("Consolas", 12), fg_color=colors["input_bg"],
+                 border_width=0).pack(fill="x", pady=(2, 0))
 
     result = {}
 
@@ -632,12 +610,9 @@ def import_options(root, colors):
         result.update({"mode": mode.get(), "date_from": date_from.get().strip(),
                        "date_to": date_to.get().strip(), "codes": codes.get().strip()})
         win.destroy()
-    bar = tk.Frame(win, bg=colors["bg"]); bar.pack(fill="x", side="bottom", padx=24, pady=16)
-    tk.Button(bar, text="เริ่มนำเข้า →", command=ok, bg=colors["accent"], fg=colors["on_accent"],
-              font=("Segoe UI", 11, "bold"), pady=8, relief="flat", cursor="hand2").pack(side="right")
-    tk.Button(bar, text="ยกเลิก", command=win.destroy, bg=colors["btn_default"], fg=colors["text"],
-              relief="flat", font=("Segoe UI", 10, "bold"), padx=18, pady=8,
-              cursor="hand2").pack(side="right", padx=(0, 10))
+    bar = ctk.CTkFrame(win, fg_color="transparent"); bar.pack(fill="x", side="bottom", padx=24, pady=16)
+    _btn(bar, "เริ่มนำเข้า →", ok, colors, kind="accent", height=42, font=(FONT, 13, "bold")).pack(side="right")
+    _btn(bar, "ยกเลิก", win.destroy, colors, height=42, width=100, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     root.wait_window(win)
     return result if result else None

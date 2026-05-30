@@ -13,6 +13,27 @@
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-30 (#4) - Claude Code — v2.4 Beta 1 (แปลงทั้งโปรแกรมเป็น CustomTkinter)
+
+branch: `customtkinter-ui` (แตกจาก improve-7-features). **แผนสำรอง:** Beta 3 ยังอยู่ครบที่
+branch `improve-7-features` + Release v2.3_Beta_3-105 — ถ้า CTk มีปัญหา ใช้ของเดิมได้
+
+- **เปลี่ยน GUI toolkit:** tkinter ดิบ → **customtkinter 5.2.2** (ปุ่มมุมโค้ง/ธีมดำเนียน/เรนเดอร์สีเท่ากัน Mac+Win)
+- **คงตรรกะทั้งหมด:** `pixup_workflow.py`/`config.py`/`chatgpt_retouch.py` ไม่แตะ. flow/ขั้นเดิมครบ
+- **`pixup.py` เขียนใหม่:** CTkFrame/CTkButton/CTkEntry/CTkProgressBar/CTkTextbox/CTkSwitch/CTkScrollableFrame.
+  root = `make_root()` ใช้ mixin `ctk.CTk + TkinterDnD.DnDWrapper` (DnD ยังใช้ได้; fallback ctk.CTk).
+  รายการขั้น = ปุ่ม pill (active=accent), settings/category = CTkToplevel.
+  Gotchas ที่จัดการแล้ว: `CTkProgressBar.set()` ใช้สัดส่วน 0..1 (เก็บ `_progress_max`), log ใช้
+  `CTkTextbox._textbox.tag_config` คงสี, iconbitmap ตั้งหลัง after(280) ให้ชนะ CTk, DnD register บน `_entry`
+- **`dialogs.py` เขียนใหม่:** 7 ไดอะล็อกเป็น ctk. **merge/crop คง tk.Canvas + ตรรกะ build/drag/zoom เดิม**
+  เปลี่ยนแค่ปุ่ม/แถบ→CTkSlider. รูปย่อใช้ CTkImage. radio/checkbox→CTkRadioButton/CTkCheckBox
+- **Build:** requirements เพิ่ม `customtkinter`; build.yml เพิ่ม `--collect-all customtkinter --collect-all darkdetect`
+  (CTk มี asset ที่ PyInstaller ลืม → ไม่ใส่ = .exe เด้งปิด) **ต้องเทส build จริงว่าเปิดได้**
+
+QA: py_compile pixup/dialogs ผ่าน, smoke สร้าง CTk root+app+7 ขั้น+log สี+progress ผ่าน,
+render 7 ไดอะล็อก (auto-close) ผ่านหมด, **screenshot บน mac เห็นจริง** (หน้าหลัก + import dialog สวย โค้งมน teal).
+**ต้องทำต่อ:** เทส build .exe จาก branch ว่าเปิดได้ไม่เด้งปิด → ส่งผู้ใช้เทส Windows (DnD, canvas, AI)
+
 ### 2026-05-30 (#3) - Claude Code — v2.3 Beta 3 (รื้อ UI ให้คลีน + โลโก้)
 
 branch: `improve-7-features` (ต่อจาก Beta 2 — ยังไม่ merge main)

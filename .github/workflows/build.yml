@@ -41,6 +41,8 @@ jobs:
           pyinstaller --onefile --noconsole \
             --icon app_icon.ico \
             --add-data "logo.png;." \
+            --collect-all customtkinter \
+            --collect-all darkdetect \
             --name "PixUp_v${{ steps.get_version.outputs.VERSION }}" pixup.py
 
       - name: Upload Artifact
