@@ -36,8 +36,12 @@ jobs:
           echo "Found version: $CLEAN_VERSION"
 
       - name: Build EXE with PyInstaller
+        shell: bash
         run: |
-          pyinstaller --onefile --noconsole --name "PixUp_v${{ steps.get_version.outputs.VERSION }}" pixup.py
+          pyinstaller --onefile --noconsole \
+            --icon app_icon.ico \
+            --add-data "logo.png;." \
+            --name "PixUp_v${{ steps.get_version.outputs.VERSION }}" pixup.py
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4

@@ -32,6 +32,12 @@ VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
 VERSION = "2.3 Beta 2"
 
 
+def resource_path(rel):
+    """หาเส้นทางไฟล์ทรัพยากร — รองรับทั้งรันสด และไฟล์ .exe (PyInstaller bundle)"""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
 class PixUpApp:
     def __init__(self, root):
         self.root = root
@@ -40,6 +46,7 @@ class PixUpApp:
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1320x900")
         self.root.minsize(1100, 720)
+        self._set_window_icon()
 
         self.error_codes = {
             "E001": "เส้นทางไม่ถูกต้องหรือหาไม่พบ (Path Not Found)",
@@ -491,6 +498,27 @@ class PixUpApp:
             self.status_var.set("")
             self._render_steps_state()
         self.root.after(120, self._animation_loop)
+
+    # ===================== window icon =====================
+    def _set_window_icon(self):
+        """ตั้งไอคอนหน้าต่าง (title bar + taskbar) — รองรับทั้งรันสดและ .exe"""
+        # ให้ Windows ใช้ไอคอนของหน้าต่างเองใน taskbar (ไม่รวมกับ python)
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KHCreation.PixUp")
+            except Exception:
+                pass
+            try:
+                self.root.iconbitmap(resource_path("app_icon.ico"))
+            except Exception:
+                pass
+        try:
+            from PIL import Image, ImageTk
+            self._icon_img = ImageTk.PhotoImage(Image.open(resource_path("logo.png")))
+            self.root.iconphoto(True, self._icon_img)
+        except Exception:
+            pass
 
     # ===================== sound notification =====================
     def play_done_sound(self):
