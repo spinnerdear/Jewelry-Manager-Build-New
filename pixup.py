@@ -29,14 +29,14 @@ except ImportError:
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
 
-VERSION = "2.3 Beta 1"
+VERSION = "2.3 Beta 2"
 
 
 class PixUpApp:
     def __init__(self, root):
         self.root = root
         # literal เพื่อให้ .github/workflows/build.yml grep เวอร์ชันได้ (อย่าเปลี่ยนเป็นตัวแปร)
-        self.version = "2.3 Beta 1"
+        self.version = "2.3 Beta 2"
         self.root.title(f"PixUp v{self.version}")
         self.root.geometry("1320x900")
         self.root.minsize(1100, 720)
@@ -60,6 +60,7 @@ class PixUpApp:
         self.chatgpt_url = tk.StringVar(value=self.settings.get("chatgpt_url", ""))
         self.chrome_profile_dir = tk.StringVar(value=self.settings.get("chrome_profile_dir", ""))
         self.type_mapping = dict(self.settings.get("types", config.DEFAULT_TYPES))
+        self.sound_enabled = tk.BooleanVar(value=self.settings.get("sound_enabled", True))
 
         # ธีม
         self.theme_name = self.settings.get("theme", theme_mod.DEFAULT_THEME)
@@ -120,6 +121,7 @@ class PixUpApp:
             "archive": self.archive_dir.get(), "camera_source": self.camera_source.get(),
             "chatgpt_url": self.chatgpt_url.get(), "chrome_profile_dir": self.chrome_profile_dir.get(),
             "theme": self.theme_name, "accent": self.accent, "types": self.type_mapping,
+            "sound_enabled": self.sound_enabled.get(),
         }
 
     def save_settings(self):
@@ -265,9 +267,6 @@ class PixUpApp:
         tk.Button(h, text="⚙", command=self.open_settings, bg=c["bg_alt"], fg=c["text_dim"],
                   relief="flat", font=("Segoe UI", 18), activebackground=c["bg_alt"],
                   activeforeground=c["accent"], cursor="hand2").pack(side="right", padx=(8, 20))
-        tk.Button(h, text="🛠 Tools", command=self.open_tools, bg=c["bg_alt"], fg=c["text_dim"],
-                  relief="flat", font=("Segoe UI", 10), activebackground=c["bg_alt"],
-                  activeforeground=c["accent"], cursor="hand2").pack(side="right", padx=4)
         # theme selector
         self.theme_var = tk.StringVar(value=self.theme_name)
         tm = ttk.Combobox(h, textvariable=self.theme_var, values=list(theme_mod.THEMES.keys()),
@@ -493,6 +492,31 @@ class PixUpApp:
             self._render_steps_state()
         self.root.after(120, self._animation_loop)
 
+    # ===================== sound notification =====================
+    def play_done_sound(self):
+        """เล่นเสียงแจ้งเตือนเมื่อขั้นที่ใช้เวลานานเสร็จ (เรียกจาก thread ไหนก็ได้)"""
+        try:
+            if not self.sound_enabled.get():
+                return
+        except tk.TclError:
+            return
+
+        def _play():
+            try:
+                if sys.platform == "darwin":
+                    os.system('afplay /System/Library/Sounds/Glass.aiff >/dev/null 2>&1')
+                elif sys.platform.startswith("win"):
+                    import winsound
+                    winsound.MessageBeep(winsound.MB_ICONASTERISK)
+                else:
+                    self.root.after(0, self.root.bell)
+            except Exception:
+                try:
+                    self.root.after(0, self.root.bell)
+                except Exception:
+                    pass
+        threading.Thread(target=_play, daemon=True).start()
+
     # ===================== misc actions =====================
     def open_folder(self, path):
         if not path or not os.path.exists(path):
@@ -541,23 +565,7 @@ class PixUpApp:
             if messagebox.askyesno("New Workspace", f"ใช้โฟลเดอร์ล่าสุดนี้เป็น Workspace?\n{cands[0]}"):
                 self.source_dir.set(latest)
 
-    # ===================== Tools menu =====================
-    def open_tools(self):
-        c = self.colors
-        m = tk.Toplevel(self.root); m.title("Tools"); m.geometry("420x360")
-        m.configure(bg=c["bg"]); m.grab_set()
-        tk.Label(m, text="🛠 เครื่องมือ", bg=c["bg"], fg=c["accent"],
-                 font=("Segoe UI", 14, "bold")).pack(anchor="w", padx=20, pady=(18, 10))
-
-        def tool(text, cmd):
-            self._styled_button(m, text, cmd, c["btn_default"], c["text"]).pack(fill="x", padx=20, pady=5)
-
-        tool("🗂 จัดกลุ่มตามรหัส (ฉุกเฉิน)", lambda: [m.destroy(), workflow.phase_group(self)])
-        tool("🧹 ล้างความจำการนำเข้า", self.reset_import_memory)
-        tool("📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
-        tool("📜 เปิดไฟล์ Log", lambda: self.open_folder(config.CONFIG_DIR))
-        tool("🏷 จัดการหมวดหมู่", lambda: [m.destroy(), self.open_category_manager()])
-
+    # ===================== Tools (ย้ายเข้าไปในหน้า Settings แล้ว) =====================
     def reset_import_memory(self):
         if messagebox.askyesno("ยืนยัน", "ล้างความจำการนำเข้าทั้งหมด?\nครั้งหน้าโหมด 'ดึงเฉพาะใหม่' จะดึงรูปเก่ามาใหม่"):
             try:
@@ -570,10 +578,25 @@ class PixUpApp:
     def open_settings(self):
         c = self.colors
         win = tk.Toplevel(self.root); win.title("ตั้งค่า / Settings")
-        win.geometry("600x640"); win.configure(bg=c["bg"]); win.grab_set()
+        win.geometry("620x720"); win.configure(bg=c["bg"]); win.grab_set()
         tk.Label(win, text="⚙ SETTINGS", bg=c["bg"], fg=c["accent"],
                  font=("Segoe UI", 16, "bold")).pack(anchor="w", padx=24, pady=(20, 10))
-        body = tk.Frame(win, bg=c["bg"]); body.pack(fill="both", expand=True, padx=24)
+
+        # ปุ่มบันทึก (อยู่ล่างสุด ไม่เลื่อนหาย)
+        def save_close():
+            self.save_settings(); win.destroy(); self.log("บันทึกการตั้งค่าแล้ว", "success")
+        self._styled_button(win, "บันทึก & ปิด", save_close, c["accent"], c["on_accent"]).pack(
+            side="bottom", fill="x", padx=24, pady=16)
+
+        # เนื้อหาแบบเลื่อนได้ (การ์ดเยอะ)
+        outer = tk.Frame(win, bg=c["bg"]); outer.pack(fill="both", expand=True, padx=24)
+        canvas = tk.Canvas(outer, bg=c["bg"], highlightthickness=0); canvas.pack(side="left", fill="both", expand=True)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview); sb.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=sb.set)
+        body = tk.Frame(canvas, bg=c["bg"]); canvas.create_window((0, 0), window=body, anchor="nw", width=560)
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        win.bind("<Destroy>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
         self._path_card(body, "PHOTO 1 — MAIN DATABASE", self.photo1_dir)
         self._path_card(body, "PHOTO 2 — BACKUP DATABASE", self.photo2_dir)
@@ -588,10 +611,28 @@ class PixUpApp:
         tk.Entry(cg, textvariable=self.chatgpt_url, font=("Consolas", 9), bg=c["input_bg"], fg=c["text"],
                  relief="flat", insertbackground="white").pack(fill="x", pady=(6, 0), ipady=5)
 
-        def save_close():
-            self.save_settings(); win.destroy(); self.log("บันทึกการตั้งค่าแล้ว", "success")
-        self._styled_button(win, "บันทึก & ปิด", save_close, c["accent"], c["on_accent"]).pack(
-            fill="x", padx=24, pady=16)
+        # ===== เสียงแจ้งเตือน =====
+        snd = tk.Frame(body, bg=c["card"], padx=14, pady=10, highlightthickness=1, highlightbackground=c["border"])
+        snd.pack(fill="x", pady=6)
+        tk.Checkbutton(snd, text="🔔 เปิดเสียงแจ้งเตือนเมื่อขั้นที่ใช้เวลานานเสร็จ (นำเข้า/AI/เก็บเข้าฐาน/คลัง)",
+                       variable=self.sound_enabled, bg=c["card"], fg=c["text"], selectcolor=c["input_bg"],
+                       activebackground=c["card"], font=("Segoe UI", 9), anchor="w",
+                       command=self.save_settings).pack(anchor="w")
+
+        # ===== เครื่องมือ (ย้ายมาจากเมนู Tools เดิม) =====
+        tools = tk.Frame(body, bg=c["card"], padx=14, pady=10, highlightthickness=1, highlightbackground=c["border"])
+        tools.pack(fill="x", pady=6)
+        tk.Label(tools, text="🛠 เครื่องมือ", bg=c["card"], fg=c["text_dim"],
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w")
+
+        def tool(text, cmd):
+            tk.Button(tools, text=text, command=cmd, bg=c["btn_default"], fg=c["text"], relief="flat",
+                      font=("Segoe UI", 9), cursor="hand2", anchor="w").pack(fill="x", pady=3)
+
+        tool("🗂 จัดกลุ่มตามรหัส", lambda: [win.destroy(), workflow.phase_group(self)])
+        tool("🏷 จัดการหมวดหมู่สินค้า (R/N/E/UN ...)", lambda: [win.destroy(), self.open_category_manager()])
+        tool("🧹 ล้างความจำการนำเข้า", self.reset_import_memory)
+        tool("📜 เปิดโฟลเดอร์ Log", lambda: self.open_folder(config.CONFIG_DIR))
 
     def _path_card(self, parent, label, var):
         c = self.colors

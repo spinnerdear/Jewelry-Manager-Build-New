@@ -21,6 +21,7 @@ DEFAULTS = {
     "camera_source": "", "chatgpt_url": "", "chrome_profile_dir": "",
     "theme": "graphite", "accent": "#00c2a8",
     "types": DEFAULT_TYPES,
+    "sound_enabled": True,
 }
 
 

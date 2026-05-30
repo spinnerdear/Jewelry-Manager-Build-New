@@ -380,7 +380,7 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         await asyncio.sleep(1)
         ok = await _download_image(page, info, out_path, on_log)
         if ok:
-            _upscale_to_match(out_path, img_path, on_log)
+            _finalize_image(out_path, img_path, on_log)
             on_log(f"    • บันทึก: {os.path.basename(out_path)}", "success")
             return True, "", False
         return False, "ดาวน์โหลดรูปไม่สำเร็จ", False
@@ -388,29 +388,39 @@ async def _retouch_one(page, img_path, out_path, custom_gpt_url, on_log):
         return False, str(e), False
 
 
-def _upscale_to_match(out_path, original_path, on_log):
-    """ขยายรูป AI ให้ด้านยาวเท่าต้นฉบับ (Lanczos) เพื่อให้ขนาดไม่เล็กกว่าเดิม"""
+def _finalize_image(out_path, original_path, on_log):
+    """แปลงไฟล์ที่ดาวน์โหลด (มักเป็น WebP/PNG) ให้เป็นฟอร์แมตตามนามสกุลจริง 'เสมอ'
+    + ขยายให้ด้านยาวเท่าต้นฉบับถ้าเล็กกว่า — กันปัญหาไฟล์ .jpg ที่เปิดไม่ได้"""
     try:
         from PIL import Image
         with Image.open(original_path) as orig:
             ow, oh = orig.size
+        is_jpeg = out_path.lower().endswith((".jpg", ".jpeg"))
         with Image.open(out_path) as ai:
             ai.load()
-            aw, ah = ai.size
+            img = ai
+            aw, ah = img.size
             target = max(ow, oh)
             cur = max(aw, ah)
-            if cur >= target:
-                return  # ใหญ่พอแล้ว
-            scale = target / cur
-            new_size = (round(aw * scale), round(ah * scale))
-            up = ai.resize(new_size, Image.Resampling.LANCZOS)
-        if out_path.lower().endswith((".jpg", ".jpeg")):
-            up.save(out_path, "JPEG", quality=95, optimize=True)
-        else:
-            up.save(out_path)
-        on_log(f"    • ขยายเป็น {new_size[0]}x{new_size[1]} ให้เท่าต้นฉบับ", "info")
+            resized = False
+            if cur < target:  # เล็กกว่าต้นฉบับ → ขยายด้วย Lanczos
+                scale = target / cur
+                new_size = (round(aw * scale), round(ah * scale))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                resized = True
+            # บันทึกใหม่ตามนามสกุลจริงเสมอ (รับประกันว่าเนื้อในตรงกับนามสกุล)
+            if is_jpeg:
+                if img.mode != "RGB":
+                    img = img.convert("RGB")  # ตัด alpha/พาเลตต์ ป้องกัน JPEG เสีย
+                img.save(out_path, "JPEG", quality=95, optimize=True)
+            elif out_path.lower().endswith(".png"):
+                img.save(out_path, "PNG")
+            else:
+                img.save(out_path)
+        if resized:
+            on_log(f"    • ขยายเป็น {img.size[0]}x{img.size[1]} ให้เท่าต้นฉบับ", "info")
     except Exception as e:
-        on_log(f"    • ขยายรูปไม่สำเร็จ (ใช้ขนาดเดิม): {e}", "info")
+        on_log(f"    • แปลง/ขยายรูปไม่สำเร็จ (ใช้ไฟล์เดิม): {e}", "info")
 
 
 def _default_profile_dir():

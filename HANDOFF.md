@@ -13,6 +13,37 @@
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-30 - Claude Code — v2.3 Beta 2 (ปรับปรุงตามฟีดแบ็กผู้ใช้ 7 เรื่อง)
+
+branch: `improve-7-features` (ยังไม่ merge/push — รอผู้ใช้เทส GUI)
+
+**บริบท workflow จริง (ยืนยันกับผู้ใช้):** ชื่อไฟล์กล้อง `UN-8009_<uuid>.original.jpg` — "UN" เป็นแค่ชื่อไฟล์
+ไม่ใช่รหัสสินค้า. นำเข้าจัดกลุ่มตาม **เลข 4 หลัก (8009)** เท่านั้น. รหัสสินค้าจริง (เช่น `R-54321-00-S00`)
+ผู้ใช้ **ตั้งชื่อโฟลเดอร์เอง** ก่อนขั้นเปลี่ยนชื่อ → ระบบอ่านประเภทจากตัวอักษรนำหน้า (R=แหวน) ตอนเก็บเข้าฐาน
+
+**สิ่งที่แก้:**
+- **(ข้อ0/รากฐาน)** `pixup_workflow.py`: `import_number`/`folder_code` (จัดกลุ่มนำเข้าตามเลข 4 หลัก),
+  `product_type_number` (แยกประเภท+เลขจากรหัสที่ผู้ใช้ตั้งเอง รองรับหลายตัวอักษร),
+  `parse_codes_input` (รองรับ `,`/เว้นวรรค/ช่วง `1000-1005`/ปนกัน)
+- **(ข้อ1)** เปลี่ยนข้อความ error จาก "ทำขั้นนำเข้าก่อน" เป็นกลาง — ชี้ Workspace ที่มีรูปแล้วกดขั้นไหนก็ทำได้
+- **(ข้อ2a)** `resolve_dest` ใช้ `product_type_number` อ่านตัวอักษรนำหน้ารหัสโฟลเดอร์แทน `f_n[0]`
+  → รองรับประเภทหลายตัวอักษร. dry-run: `R-54321-00-S00`→Ring หา range เจอ="exists" ✓ · นำเข้า `UN-8009...`→โฟลเดอร์ `8009` ✓
+- **(ข้อ2b)** `pixup.py`: ยุบเมนู Tools เข้าไปในหน้า ⚙ Settings (ทำ body เลื่อนได้) + เอาปุ่ม Tools/คำว่า "ฉุกเฉิน" ออก + ลบ `open_tools`
+- **(ข้อ3)** `dialogs.collect_preview` รื้อใหม่เป็น **ทีละสินค้า** (‹ ›) โชว์รูปต้นทาง + รูปปลายทางเดิม P1/P2
+  + radio แทนที่/ไม่แทนของเดิม(skip_dup)/ข้ามสินค้า. `phase_collect` ส่ง `*_existing` + เคารพ `decisions`
+- **(ข้อ4)** `dialogs.calendar_picker` ปฏิทินทำเอง (ไม่เพิ่ม lib) ผูกในโหมดนำเข้าตามวันที่ (ปุ่ม 📅, พิมพ์เองได้)
+- **(ข้อ5)** โหมดนำเข้าตามรหัสใช้ `parse_codes_input` + อัปเดตข้อความช่วย
+- **(ข้อ6)** `chatgpt_retouch.py`: `_upscale_to_match` → `_finalize_image` — **re-encode ตามนามสกุลจริงเสมอ**
+  (JPEG→convert RGB) แก้ไฟล์ .jpg ที่จริงเป็น WebP/PNG เปิดไม่ได้. dry-run: ไฟล์ปลอม PNG/WebP→JPEG จริงผ่าน ✓
+- **(ข้อ7)** `pixup.py` `play_done_sound()` ข้ามแพลตฟอร์ม (mac afplay / win MessageBeep / fallback bell)
+  เรียกท้ายขั้นที่ใช้เวลานาน (นำเข้า/AI/เก็บเข้าฐาน/คลัง) + สวิตช์ `sound_enabled` ใน Settings/config
+
+QA: py_compile 5 ไฟล์ผ่าน, smoke test สร้าง UI+สลับ 7 ขั้นผ่าน, dry-run parse_code/parse_codes_input/resolve_dest
+ด้วยชื่อไฟล์จริงผ่าน, _finalize_image แก้ format ผ่าน, render dialogs ใหม่ (collect/calendar/import) ไม่ error.
+grep ไม่พบ dangling ref (open_tools/_upscale_to_match/f_n[0]).
+**Risk/ผู้ใช้ต้องเทสบนเครื่อง:** หน้าตา/คลิกจริง, ปฏิทินเลือกวัน, collect ทีละสินค้า, เสียงแจ้งเตือน,
+ขั้น AI กับ ChatGPT จริง. นำเข้ายังจัดกลุ่มตามเลข 4 หลัก (โฟลเดอร์ `8009` เหมือนเดิม) — ไม่กระทบ flow เดิม
+
 ### 2026-05-29 (PM-4) - Claude Code — v2.3 Beta 1 (รื้อใหญ่: Lightroom UI + แยกโมดูล)
 
 **เปลี่ยนสถาปัตยกรรมเป็น 6 โมดูล:** `pixup.py`(UI/หลัก) · `theme.py` · `config.py` · `dialogs.py` · `workflow.py` · `chatgpt_retouch.py`

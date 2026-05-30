@@ -20,6 +20,61 @@ except Exception:
 
 EXCLUDE_DIRS = ("ai_retouched", "_rename_temp")
 
+# เลข 4 หลักในชื่อไฟล์กล้อง (ใช้จัดกลุ่มตอนนำเข้า) เช่น "UN-8009_xxx.jpg" -> "8009"
+# หมายเหตุ: ตัวอักษรหน้าชื่อไฟล์กล้อง (UN) เป็นแค่ชื่อไฟล์ ไม่ใช่รหัสสินค้า
+_NUM4_RE = re.compile(r'(\d{4})')
+# ประเภทสินค้า = ตัวอักษรนำหน้า "รหัสที่ผู้ใช้ตั้งชื่อโฟลเดอร์เอง" เช่น "R-54321-00-S00" -> "R"
+_TYPE_RE = re.compile(r'^\s*([A-Za-z]+)')
+
+
+# ----------------------------- code helpers -----------------------------
+def import_number(name):
+    """เลข 4 หลักจากชื่อไฟล์กล้อง สำหรับจัดกลุ่มตอนนำเข้า — ไม่พบ คืน '' """
+    m = _NUM4_RE.search(name or "")
+    return m.group(1) if m else ""
+
+
+def folder_code(name):
+    """ชื่อโฟลเดอร์ตอนนำเข้า = เลข 4 หลัก เช่น 'UN-8009_xxx.jpg' -> '8009'"""
+    num = import_number(name)
+    return num if num else "_ungrouped"
+
+
+def product_type_number(folder_name):
+    """แยกรหัสสินค้าที่ผู้ใช้ตั้งชื่อโฟลเดอร์เอง เป็น (type_letters, number)
+    เช่น 'R-54321-00-S00' -> ('R', 54321), '8009' -> ('', 8009)"""
+    fn = folder_name or ""
+    mt = _TYPE_RE.match(fn)
+    type_key = mt.group(1).upper() if mt else ""
+    mn = re.search(r'(\d+)', fn)
+    number = int(mn.group(1)) if mn else 0
+    return type_key, number
+
+
+def parse_codes_input(s):
+    """แปลงข้อความรหัสหลายรูปแบบเป็น set ของเลข 4 หลัก
+    รองรับ: '1000,1001' · '1000 1001 1002' · '1000-1005' (ช่วง) · ปนกัน"""
+    codes = set()
+    if not s:
+        return codes
+    # คั่นด้วยจุลภาคหรือเว้นวรรค แต่คงขีดของช่วงไว้
+    for token in re.split(r'[,\s]+', s.strip()):
+        token = token.strip()
+        if not token:
+            continue
+        rng = re.match(r'^(\d{1,4})\s*-\s*(\d{1,4})$', token)
+        if rng:
+            lo, hi = int(rng.group(1)), int(rng.group(2))
+            if lo > hi:
+                lo, hi = hi, lo
+            for n in range(lo, hi + 1):
+                codes.add(f"{n:04d}")
+        else:
+            m = re.search(r'(\d{1,4})', token)
+            if m:
+                codes.add(f"{int(m.group(1)):04d}")
+    return codes
+
 
 # ----------------------------- helpers -----------------------------
 def _folders(app, src):
@@ -94,7 +149,7 @@ def phase_import(app):
             date_to = _parse_date(opt.get("date_to"), end=True)
         wanted_codes = None
         if mode == "codes":
-            wanted_codes = {c.strip() for c in opt.get("codes", "").split(",") if c.strip()}
+            wanted_codes = parse_codes_input(opt.get("codes", ""))
             if not wanted_codes:
                 app.log_threadsafe("ไม่ได้ระบุรหัส — ยกเลิก", "warning")
                 app.set_running("import", False); return
@@ -115,8 +170,8 @@ def phase_import(app):
                 if date_to and st.st_mtime > date_to:
                     continue
             if mode == "codes":
-                m = re.search(r'(\d{4})', f)
-                if not (m and m.group(1) in wanted_codes):
+                num = import_number(f)
+                if not (num and num in wanted_codes):
                     continue
             candidates.append((f, full, sig))
 
@@ -129,8 +184,7 @@ def phase_import(app):
         total = len(candidates)
         for i, (f, full, sig) in enumerate(candidates):
             app.set_count_threadsafe(i + 1, total)
-            m = re.search(r'(\d{4})', f)
-            code = m.group(1) if m else "_ungrouped"
+            code = folder_code(f)
             target_dir = os.path.join(dst, code)
             try:
                 os.makedirs(target_dir, exist_ok=True)
@@ -151,6 +205,7 @@ def phase_import(app):
         _summary(app, "นำเข้า", ok=ok, fail=fail, t0=t0)
         app.mark_completed("import")
         app.set_count_threadsafe(0, 0)
+        app.play_done_sound()
         app.set_running("import", False)
     threading.Thread(target=task, daemon=True).start()
 
@@ -183,9 +238,9 @@ def phase_group(app):
         ok = fail = 0; total = len(files)
         for i, f in enumerate(files):
             app.set_count_threadsafe(i + 1, total)
-            m = re.search(r'(\d{4})', f)
-            if m:
-                c = m.group(1); t = os.path.join(src, c)
+            num = import_number(f)
+            if num:
+                c = folder_code(f); t = os.path.join(src, c)
                 os.makedirs(t, exist_ok=True)
                 try:
                     shutil.move(os.path.join(src, f), os.path.join(t, f)); ok += 1
@@ -206,7 +261,7 @@ def phase_merge(app):
         app.error("ไม่พบ Workspace", "E001"); return
     folders = _folders(app, src)
     if not folders:
-        app.error("ยังไม่มีโฟลเดอร์ ทำขั้นนำเข้าก่อน"); return
+        app.error("ยังไม่พบโฟลเดอร์รูปใน Workspace — เลือก Workspace ที่มีรูปอยู่แล้ว หรือทำขั้นนำเข้าก่อน"); return
 
     sel = dialogs.image_selector(app.root, app.colors, folders, 2,
                                  "เลือก 2 รูปต่อโฟลเดอร์เพื่อรวม (Merge)",
@@ -246,7 +301,7 @@ def phase_crop(app):
         app.error("ไม่พบ Workspace", "E001"); return
     folders = _folders(app, src)
     if not folders:
-        app.error("ยังไม่มีโฟลเดอร์ ทำขั้นนำเข้าก่อน"); return
+        app.error("ยังไม่พบโฟลเดอร์รูปใน Workspace — เลือก Workspace ที่มีรูปอยู่แล้ว หรือทำขั้นนำเข้าก่อน"); return
 
     sel = dialogs.image_selector(app.root, app.colors, folders, None,
                                  "เลือกรูปที่จะครอบตัด (เลือกได้หลายรูป)",
@@ -287,7 +342,7 @@ def phase_ai(app):
         return
     folders = _folders(app, src)
     if not folders:
-        app.error("ยังไม่มีโฟลเดอร์ ทำขั้นนำเข้าก่อน"); return
+        app.error("ยังไม่พบโฟลเดอร์รูปใน Workspace — เลือก Workspace ที่มีรูปอยู่แล้ว หรือทำขั้นนำเข้าก่อน"); return
 
     sel = dialogs.image_selector(app.root, app.colors, folders, None,
                                  "เลือกรูปสำหรับรีทัช AI",
@@ -341,6 +396,7 @@ def _ai_worker(app):
         _summary(app, "AI", ok=counters["ok"], fail=counters["fail"], t0=t0)
         app.mark_completed("ai")
     app.set_count_threadsafe(0, 0)
+    app.play_done_sound()
     app.ai_restore_ui()
     app.set_running("ai", False)
 
@@ -352,7 +408,7 @@ def phase_rename(app):
         app.error("ไม่พบ Workspace", "E001"); return
     folders = [d for d in os.listdir(src) if os.path.isdir(os.path.join(src, d)) and d not in EXCLUDE_DIRS]
     if not folders:
-        app.error("ไม่พบโฟลเดอร์ ทำขั้นนำเข้าก่อน"); return
+        app.error("ยังไม่พบโฟลเดอร์รูปใน Workspace — เลือก Workspace ที่มีรูปอยู่แล้ว หรือทำขั้นนำเข้าก่อน"); return
 
     def task():
         t0 = time.time(); app.set_running("rename", True)
@@ -445,8 +501,8 @@ def _nearest_range_dir(cat_dir, r_v):
 
 def resolve_dest(app, dest_base, f_n):
     """คืน (target_dir, rel, status): exists|nearest|new|no_category"""
-    p_t = app.type_mapping.get(f_n[0].upper(), "Other")
-    m = re.search(r'(\d+)', f_n); r_v = int(m.group(1)) if m else 0
+    type_key, r_v = product_type_number(f_n)
+    p_t = app.type_mapping.get(type_key, "Other") if type_key else "Other"
     if "-VN-" in f_n.upper():
         rel = os.path.join("Vincentio", p_t)
         target = os.path.join(dest_base, rel)
@@ -485,8 +541,16 @@ def phase_collect(app):
                      if app.is_image_file(f) and os.path.splitext(f)[0].lower() == f_n.lower()]
         if not primaries:
             continue
-        plan.append({"folder": f_n, "file": primaries[0], "fpath": os.path.join(f_p, primaries[0]),
-                     "p1": resolve_dest(app, p1, f_n), "p2": resolve_dest(app, p2, f_n)})
+        fname = primaries[0]
+        p1d = resolve_dest(app, p1, f_n)
+        p2d = resolve_dest(app, p2, f_n)
+        # ไฟล์ปลายทางเดิม (ถ้ามี = จะถูกแทนที่)
+        p1_ex = os.path.join(p1d[0], fname)
+        p2_ex = os.path.join(p2d[0], fname)
+        plan.append({"folder": f_n, "file": fname, "fpath": os.path.join(f_p, fname),
+                     "p1": p1d, "p2": p2d,
+                     "p1_existing": p1_ex if os.path.exists(p1_ex) else None,
+                     "p2_existing": p2_ex if os.path.exists(p2_ex) else None})
     if not plan:
         app.error("ไม่พบรูปหลัก (ทำขั้นเปลี่ยนชื่อก่อน)"); return
 
@@ -494,6 +558,7 @@ def phase_collect(app):
     if not result:
         app.log("ขั้นเก็บเข้าฐานข้อมูล: ยกเลิก", "warning"); return
     allow_new = result["allow_new"]
+    decisions = result["decisions"]  # {folder: "replace"|"skip_dup"|"skip"}
 
     def task():
         t0 = time.time(); app.set_running("collect", True)
@@ -501,15 +566,22 @@ def phase_collect(app):
         for i, item in enumerate(plan):
             app.set_count_threadsafe(i + 1, total)
             f_n, f_src, fname = item["folder"], item["fpath"], item["file"]
+            decision = decisions.get(f_n, "replace")
+            if decision == "skip":
+                app.log_threadsafe(f"ข้าม {f_n} → ผู้ใช้เลือกข้ามสินค้านี้", "warning"); skip += 1
+                app.set_progress_threadsafe((i + 1) / total * 100); continue
             for key in ("p1", "p2"):
                 target, rel, status = item[key]
                 if status == "no_category":
                     app.log_threadsafe(f"ข้าม {f_n} → ไม่พบหมวดใน {key.upper()} ({rel})", "warning"); skip += 1; continue
                 if status == "new" and not allow_new:
                     app.log_threadsafe(f"ข้าม {f_n} → ปลายทางใหม่ ({rel}) ยังไม่อนุญาตสร้าง", "warning"); skip += 1; continue
+                dest_file = os.path.join(target, fname)
+                if decision == "skip_dup" and os.path.exists(dest_file):
+                    app.log_threadsafe(f"ไม่แทนของเดิม {f_n} → {key.upper()} ({rel})", "warning"); skip += 1; continue
                 try:
                     os.makedirs(target, exist_ok=True)
-                    shutil.copy2(f_src, os.path.join(target, fname)); ok += 1
+                    shutil.copy2(f_src, dest_file); ok += 1
                 except Exception as e:
                     fail += 1
                     app.log_threadsafe(f"คัดลอกล้มเหลว {f_n} → {target}: {e}", "error", "E007")
@@ -517,6 +589,7 @@ def phase_collect(app):
         _summary(app, "เก็บเข้าฐานข้อมูล", ok=ok, fail=fail, skip=skip, t0=t0)
         app.mark_completed("collect")
         app.set_count_threadsafe(0, 0)
+        app.play_done_sound()
         app.set_running("collect", False)
     threading.Thread(target=task, daemon=True).start()
 
@@ -551,5 +624,6 @@ def phase_archive(app):
         _summary(app, "คลัง", ok=ok, fail=fail, t0=t0)
         app.mark_completed("archive")
         app.set_count_threadsafe(0, 0)
+        app.play_done_sound()
         app.set_running("archive", False)
     threading.Thread(target=task, daemon=True).start()
