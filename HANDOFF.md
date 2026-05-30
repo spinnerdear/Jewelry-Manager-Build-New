@@ -13,6 +13,28 @@
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-30 (#3) - Claude Code — v2.3 Beta 3 (รื้อ UI ให้คลีน + โลโก้)
+
+branch: `improve-7-features` (ต่อจาก Beta 2 — ยังไม่ merge main)
+
+- **โลโก้/ไอคอน:** logo.png (เพชรเทอร์คอยซ์) + app_icon.ico, ใส่ใน .exe (`--icon`) + หน้าต่าง/taskbar
+  (`resource_path` + `_set_window_icon`). bundle logo.png เข้า .exe ผ่าน `--add-data`
+- **ธีมเดียว midnight + accent teal:** ปรับพาเลตต์ `theme.py` midnight ให้คลีน, ตั้งคงที่ใน `pixup.py`
+  เอา dropdown สลับธีม + ปุ่มเลือกสี (color picker) ออก, ลบ `change_theme/pick_accent/_rebuild_ui` + import colorchooser
+  รวมสีทุกขั้นเป็น accent เดียว (เลิกใช้ purple/orange/highlight ต่อขั้น)
+- **Header:** เอา "KH CREATION" ออก, ใส่โลโก้รูป + "PixUp" + เวอร์ชัน, เหลือปุ่ม ⚙ อย่างเดียว, เส้นคั่นบาง
+- **ลดขนาด + log ใหญ่ขึ้น:** 1320x900→1140x800, minsize 980x680, คอลัมน์ซ้าย230→196 ขวา300→250,
+  log height 8→13 (fill both expand)
+- **ตัวเลือกฝั่งขวาต่อขั้น (`_render_panel`):** ออกแบบใหม่ต่อขั้น — import: กล้อง/Workspace/จัดกลุ่มตามรหัส/ล้างความจำ ·
+  collect: **Photo 1 + Photo 2** + Workspace · ai: Workspace + ตั้งค่า ChatGPT · archive: คลัง + Workspace
+- **ย้าย "จัดกลุ่มตามรหัส"** จาก Settings → ขั้น 1 ฝั่งขวา (เอาออกจาก Settings tools)
+- **คลีนอัป UI:** รายการขั้นมีแถบ accent ซ้ายตอน active, การ์ดกลางกระชับ (badge ขั้น+sub), ปุ่ม nav/panel hover เนียน
+
+QA: py_compile pixup/theme ผ่าน, smoke สร้าง UI+วน 7 ขั้น+open_settings+category manager ผ่าน, grep ไม่เหลือ
+dangling (change_theme/pick_accent/theme_var/_rebuild_ui/KH CREATION/colorchooser). **ถ่าย screenshot จริงบน mac
+ตรวจเลย์เอาต์ผ่าน** (header/steps/panel/log วางถูก) — หมายเหตุ: ปุ่ม tk.Button ไม่รับสี bg บน macOS (โชว์เทา)
+แต่บน Windows จะเป็น teal ปกติ. **ผู้ใช้เทสจริงบน Windows:** สีปุ่ม/ความสวย/สัดส่วน
+
 ### 2026-05-30 - Claude Code — v2.3 Beta 2 (ปรับปรุงตามฟีดแบ็กผู้ใช้ 7 เรื่อง)
 
 branch: `improve-7-features` (ยังไม่ merge/push — รอผู้ใช้เทส GUI)

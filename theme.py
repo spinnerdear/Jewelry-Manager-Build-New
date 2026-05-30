@@ -12,11 +12,11 @@ THEMES = {
         "text": "#f0f1f3", "text_dim": "#a8acb4", "text_mute": "#6b6f78",
         "input_bg": "#171719",
     },
-    "midnight": {  # เทาอมน้ำเงินเข้มมาก
-        "bg": "#0f1115", "bg_alt": "#161922", "panel": "#1a1e28",
-        "card": "#1e2230", "card_hi": "#272c3c", "border": "#2c3346",
-        "text": "#eef1f6", "text_dim": "#9aa3b2", "text_mute": "#5b6474",
-        "input_bg": "#0b0d12",
+    "midnight": {  # ดำอมน้ำเงิน คลีน/พรีเมียม (ค่าเริ่มต้นใหม่)
+        "bg": "#0d1017", "bg_alt": "#121620", "panel": "#141925",
+        "card": "#1a2030", "card_hi": "#222a3d", "border": "#283143",
+        "text": "#f2f5fa", "text_dim": "#9ba6ba", "text_mute": "#5e6a80",
+        "input_bg": "#0a0d14",
     },
     "slate": {  # เทาอ่อนกว่าเล็กน้อย
         "bg": "#262629", "bg_alt": "#2e2e32", "panel": "#323237",
@@ -36,7 +36,7 @@ ACCENT_PRESETS = {
     "green": "#3ecf8e",
 }
 
-DEFAULT_THEME = "graphite"
+DEFAULT_THEME = "midnight"
 DEFAULT_ACCENT = "#00c2a8"
 
 # สีสถานะ (คงที่ ไม่ขึ้นกับธีม)

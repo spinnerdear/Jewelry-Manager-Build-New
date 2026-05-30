@@ -11,7 +11,7 @@ if sys.stderr is None: sys.stderr = NullWriter()
 
 import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, ttk, colorchooser
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from datetime import datetime
 
 import config
@@ -29,7 +29,7 @@ except ImportError:
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
 
-VERSION = "2.3 Beta 2"
+VERSION = "2.3 Beta 3"
 
 
 def resource_path(rel):
@@ -42,10 +42,10 @@ class PixUpApp:
     def __init__(self, root):
         self.root = root
         # literal เพื่อให้ .github/workflows/build.yml grep เวอร์ชันได้ (อย่าเปลี่ยนเป็นตัวแปร)
-        self.version = "2.3 Beta 2"
+        self.version = "2.3 Beta 3"
         self.root.title(f"PixUp v{self.version}")
-        self.root.geometry("1320x900")
-        self.root.minsize(1100, 720)
+        self.root.geometry("1140x800")
+        self.root.minsize(980, 680)
         self._set_window_icon()
 
         self.error_codes = {
@@ -69,9 +69,9 @@ class PixUpApp:
         self.type_mapping = dict(self.settings.get("types", config.DEFAULT_TYPES))
         self.sound_enabled = tk.BooleanVar(value=self.settings.get("sound_enabled", True))
 
-        # ธีม
-        self.theme_name = self.settings.get("theme", theme_mod.DEFAULT_THEME)
-        self.accent = self.settings.get("accent", theme_mod.DEFAULT_ACCENT)
+        # ธีม (คงที่ ธีมเดียว — เอา dropdown/color picker ออกแล้ว)
+        self.theme_name = theme_mod.DEFAULT_THEME
+        self.accent = theme_mod.DEFAULT_ACCENT
         self.colors = theme_mod.build_palette(self.theme_name, self.accent)
 
         # state
@@ -94,22 +94,22 @@ class PixUpApp:
              "action": lambda: workflow.phase_import(self), "color": "accent"},
             {"id": "merge", "no": "2", "emoji": "🔗", "title": "รวมรูปต่างหู", "sub": "Merge",
              "desc": "เลือก 2 รูป/โฟลเดอร์ (หน้า/ข้าง) รวมเป็นรูปเดียวก่อน เพื่อส่งเข้า AI แค่รูปเดียว (ประหยัดโควต้า)",
-             "action": lambda: workflow.phase_merge(self), "color": "purple"},
+             "action": lambda: workflow.phase_merge(self), "color": "accent"},
             {"id": "crop", "no": "3", "emoji": "✂️", "title": "ครอบตัด", "sub": "Crop",
              "desc": "เลือกรูปแล้วครอบตัด/จัดตำแหน่งก่อนส่ง AI จะได้รีทัชเฉพาะส่วนที่จำเป็น",
-             "action": lambda: workflow.phase_crop(self), "color": "orange"},
+             "action": lambda: workflow.phase_crop(self), "color": "accent"},
             {"id": "ai", "no": "4", "emoji": "🤖", "title": "รีทัชด้วย AI", "sub": "AI Retouch",
              "desc": "เลือกรูป (ที่รวม/ครอปแล้ว) ส่งเข้า ChatGPT รีทัชอัตโนมัติ ดาวน์โหลดกลับเป็นไฟล์ _AI และขยายเท่าต้นฉบับ",
-             "action": lambda: workflow.phase_ai(self), "color": "highlight"},
+             "action": lambda: workflow.phase_ai(self), "color": "accent"},
             {"id": "rename", "no": "5", "emoji": "🏷", "title": "เปลี่ยนชื่อ + เลือกรูปหลัก", "sub": "Rename",
              "desc": "เลือกรูปหลัก (ไฮไลต์รูป AI) แล้วเปลี่ยนชื่อไฟล์ทั้งหมดตามรหัสโฟลเดอร์ (รวมวิดีโอ)",
-             "action": lambda: workflow.phase_rename(self), "color": "highlight"},
+             "action": lambda: workflow.phase_rename(self), "color": "accent"},
             {"id": "collect", "no": "6", "emoji": "💾", "title": "เก็บเข้าฐานข้อมูล", "sub": "Collect",
              "desc": "พรีวิวรูปหลัก + ปลายทาง แล้วคัดลอกเฉพาะรูปหลักไป Photo 1/Photo 2 (ไม่สร้างโฟลเดอร์มั่ว)",
-             "action": lambda: workflow.phase_collect(self), "color": "highlight"},
+             "action": lambda: workflow.phase_collect(self), "color": "accent"},
             {"id": "archive", "no": "7", "emoji": "📦", "title": "ย้ายเข้าคลัง", "sub": "Archive",
              "desc": "ย้ายทุกโฟลเดอร์ใน Workspace เข้าคลังเก็บประวัติ จัดเรียงตามปี/เดือน/วัน",
-             "action": lambda: workflow.phase_archive(self), "color": "highlight"},
+             "action": lambda: workflow.phase_archive(self), "color": "accent"},
         ]
         for s in self.steps:
             self.is_running[s["id"]] = False
@@ -253,10 +253,12 @@ class PixUpApp:
         self._build_header()
         # body: 3 คอลัมน์
         body = tk.Frame(self.root, bg=c["bg"]); body.pack(fill="both", expand=True)
-        self.left = tk.Frame(body, bg=c["panel"], width=230); self.left.pack(side="left", fill="y")
+        self.left = tk.Frame(body, bg=c["panel"], width=196); self.left.pack(side="left", fill="y")
         self.left.pack_propagate(False)
-        self.right = tk.Frame(body, bg=c["panel"], width=300); self.right.pack(side="right", fill="y")
+        tk.Frame(body, bg=c["border"], width=1).pack(side="left", fill="y")
+        self.right = tk.Frame(body, bg=c["panel"], width=250); self.right.pack(side="right", fill="y")
         self.right.pack_propagate(False)
+        tk.Frame(body, bg=c["border"], width=1).pack(side="right", fill="y")
         self.center = tk.Frame(body, bg=c["bg"]); self.center.pack(side="left", fill="both", expand=True)
 
         self._build_steps_column()
@@ -265,73 +267,83 @@ class PixUpApp:
 
     def _build_header(self):
         c = self.colors
-        h = tk.Frame(self.root, bg=c["bg_alt"], height=70); h.pack(fill="x"); h.pack_propagate(False)
-        tk.Label(h, text="PIXUP", bg=c["bg_alt"], fg=c["accent"],
-                 font=("Segoe UI", 22, "bold")).pack(side="left", padx=(24, 6), pady=14)
-        tk.Label(h, text=f"KH CREATION  ·  v{self.version}", bg=c["bg_alt"], fg=c["text_mute"],
-                 font=("Segoe UI", 8, "bold")).pack(side="left", pady=(26, 0))
+        h = tk.Frame(self.root, bg=c["bg_alt"], height=62); h.pack(fill="x"); h.pack_propagate(False)
+        # เส้นคั่นบางใต้ header ให้ดูคลีน
+        tk.Frame(self.root, bg=c["border"], height=1).pack(fill="x")
 
-        tk.Button(h, text="⚙", command=self.open_settings, bg=c["bg_alt"], fg=c["text_dim"],
-                  relief="flat", font=("Segoe UI", 18), activebackground=c["bg_alt"],
-                  activeforeground=c["accent"], cursor="hand2").pack(side="right", padx=(8, 20))
-        # theme selector
-        self.theme_var = tk.StringVar(value=self.theme_name)
-        tm = ttk.Combobox(h, textvariable=self.theme_var, values=list(theme_mod.THEMES.keys()),
-                          width=10, state="readonly")
-        tm.pack(side="right", padx=4, pady=20)
-        tm.bind("<<ComboboxSelected>>", lambda e: self.change_theme(self.theme_var.get()))
-        tk.Button(h, text="● สี", command=self.pick_accent, bg=c["bg_alt"], fg=c["accent"],
-                  relief="flat", font=("Segoe UI", 11, "bold"), activebackground=c["bg_alt"],
-                  cursor="hand2").pack(side="right", padx=4)
+        brand = tk.Frame(h, bg=c["bg_alt"]); brand.pack(side="left", padx=(20, 0))
+        try:
+            from PIL import Image, ImageTk
+            img = Image.open(resource_path("logo.png")); img.thumbnail((34, 34))
+            self._hdr_logo = ImageTk.PhotoImage(img)
+            tk.Label(brand, image=self._hdr_logo, bg=c["bg_alt"]).pack(side="left", padx=(0, 11), pady=14)
+        except Exception:
+            pass
+        wm = tk.Frame(brand, bg=c["bg_alt"]); wm.pack(side="left", pady=12)
+        tk.Label(wm, text="PixUp", bg=c["bg_alt"], fg=c["text"],
+                 font=("Segoe UI", 17, "bold")).pack(anchor="w")
+        tk.Label(wm, text=f"v{self.version}", bg=c["bg_alt"], fg=c["text_mute"],
+                 font=("Segoe UI", 8)).pack(anchor="w")
+
+        gear = tk.Button(h, text="⚙", command=self.open_settings, bg=c["bg_alt"], fg=c["text_dim"],
+                         relief="flat", font=("Segoe UI", 17), activebackground=c["bg_alt"],
+                         activeforeground=c["accent"], cursor="hand2")
+        gear.pack(side="right", padx=(8, 18))
+        gear.bind("<Enter>", lambda e: gear.config(fg=c["accent"]))
+        gear.bind("<Leave>", lambda e: gear.config(fg=c["text_dim"]))
 
     def _build_steps_column(self):
         c = self.colors
         # workspace selector อยู่บนสุดของคอลัมน์ซ้าย
-        ws = tk.Frame(self.left, bg=c["panel"]); ws.pack(fill="x", padx=14, pady=(16, 8))
+        ws = tk.Frame(self.left, bg=c["panel"]); ws.pack(fill="x", padx=16, pady=(18, 10))
         tk.Label(ws, text="WORKSPACE", bg=c["panel"], fg=c["text_mute"],
                  font=("Segoe UI", 7, "bold")).pack(anchor="w")
         self.source_entry = tk.Entry(ws, textvariable=self.source_dir, font=("Consolas", 8),
                                      bg=c["input_bg"], fg=c["text"], relief="flat", insertbackground="white")
-        self.source_entry.pack(fill="x", ipady=4, pady=(4, 4))
+        self.source_entry.pack(fill="x", ipady=5, pady=(6, 5))
         tk.Button(ws, text="เลือกโฟลเดอร์", command=lambda: self.browse_dir(self.source_dir, False),
                   bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 8),
-                  cursor="hand2").pack(fill="x")
+                  cursor="hand2", activebackground=c["btn_hover"]).pack(fill="x", ipady=2)
 
         tk.Label(self.left, text="STEPS", bg=c["panel"], fg=c["text_mute"],
-                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=16, pady=(10, 4))
+                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=18, pady=(14, 6))
         for s in self.steps:
             row = tk.Frame(self.left, bg=c["panel"], cursor="hand2")
-            row.pack(fill="x", padx=8, pady=2)
-            badge = tk.Label(row, text=s["no"], width=3, bg=c["card"], fg=c["text_dim"],
-                             font=("Segoe UI", 11, "bold"))
-            badge.pack(side="left", padx=(4, 8), pady=6)
-            txt = tk.Label(row, text=f"{s['emoji']} {s['title']}", bg=c["panel"], fg=c["text_dim"],
+            row.pack(fill="x", padx=10, pady=1)
+            # แถบ accent ด้านซ้าย (โชว์เฉพาะขั้นที่เลือกอยู่)
+            bar = tk.Frame(row, bg=c["panel"], width=3); bar.pack(side="left", fill="y")
+            inner = tk.Frame(row, bg=c["panel"]); inner.pack(side="left", fill="x", expand=True)
+            badge = tk.Label(inner, text=s["no"], width=2, bg=c["card"], fg=c["text_dim"],
+                             font=("Segoe UI", 10, "bold"))
+            badge.pack(side="left", padx=(8, 9), pady=7)
+            txt = tk.Label(inner, text=f"{s['emoji']} {s['title']}", bg=c["panel"], fg=c["text_dim"],
                            font=("Segoe UI", 9), anchor="w", justify="left")
             txt.pack(side="left", fill="x", expand=True)
-            for w in (row, badge, txt):
+            for w in (row, inner, badge, txt):
                 w.bind("<Button-1>", lambda e, sid=s["id"]: self.show_step(sid))
-            self.step_widgets[s["id"]] = {"row": row, "badge": badge, "txt": txt}
+            self.step_widgets[s["id"]] = {"row": row, "inner": inner, "bar": bar, "badge": badge, "txt": txt}
 
     def _build_footer(self):
         c = self.colors
         wrap = tk.Frame(self.root, bg=c["bg"]); wrap.pack(side="bottom", fill="x")
-        prow = tk.Frame(wrap, bg=c["bg"]); prow.pack(fill="x", padx=16, pady=(6, 2))
+        tk.Frame(wrap, bg=c["border"], height=1).pack(fill="x")
+        prow = tk.Frame(wrap, bg=c["bg"]); prow.pack(fill="x", padx=18, pady=(8, 2))
         self.progress = ttk.Progressbar(prow, orient="horizontal", mode="determinate",
                                         style="PixUp.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True)
         tk.Label(prow, textvariable=self.count_var, bg=c["bg"], fg=c["accent"],
                  font=("Segoe UI", 9, "bold"), width=20, anchor="e").pack(side="right", padx=(8, 0))
 
-        head = tk.Frame(wrap, bg=c["bg"]); head.pack(fill="x", padx=16)
+        head = tk.Frame(wrap, bg=c["bg"]); head.pack(fill="x", padx=18, pady=(2, 0))
         tk.Label(head, text="ACTIVITY LOG", bg=c["bg"], fg=c["text_mute"],
                  font=("Segoe UI", 7, "bold")).pack(side="left")
         self.log_toggle = tk.Button(head, text="▾ ซ่อน", command=self.toggle_log, bg=c["bg"],
                                     fg=c["text_dim"], relief="flat", font=("Segoe UI", 8),
                                     cursor="hand2", activebackground=c["bg"])
         self.log_toggle.pack(side="right")
-        self.log_area = scrolledtext.ScrolledText(wrap, height=8, bg=c["input_bg"], fg=c["text_dim"],
+        self.log_area = scrolledtext.ScrolledText(wrap, height=13, bg=c["input_bg"], fg=c["text_dim"],
                                                   font=("Consolas", 9), relief="flat", padx=12, pady=8)
-        self.log_area.pack(fill="x", padx=16, pady=(4, 10))
+        self.log_area.pack(fill="both", expand=True, padx=18, pady=(4, 12))
         self.log_area.tag_config("time", foreground=c["text_mute"])
         self.log_area.tag_config("success", foreground=c["success"])
         self.log_area.tag_config("error", foreground=c["error"])
@@ -344,7 +356,8 @@ class PixUpApp:
         if self.log_visible:
             self.log_area.pack_forget(); self.log_toggle.config(text="▸ แสดง")
         else:
-            self.log_area.pack(fill="x", padx=16, pady=(4, 10)); self.log_toggle.config(text="▾ ซ่อน")
+            self.log_area.pack(fill="both", expand=True, padx=18, pady=(4, 12))
+            self.log_toggle.config(text="▾ ซ่อน")
         self.log_visible = not self.log_visible
 
     # ===================== step navigation (กดครั้งเดียว = ทำงาน) =====================
@@ -362,9 +375,11 @@ class PixUpApp:
                 continue
             active = (s["id"] == self.current_step)
             done = (s["id"] in self.completed_steps)
-            w["row"].config(bg=c["card_hi"] if active else c["panel"])
-            w["txt"].config(bg=c["card_hi"] if active else c["panel"],
-                            fg=c["text"] if active else c["text_dim"])
+            row_bg = c["card_hi"] if active else c["panel"]
+            w["row"].config(bg=row_bg)
+            w["inner"].config(bg=row_bg)
+            w["bar"].config(bg=c["accent"] if active else row_bg)
+            w["txt"].config(bg=row_bg, fg=c["text"] if active else c["text_dim"])
             if done:
                 w["badge"].config(text="✓", bg=c["accent_dim"], fg=c["text"])
             else:
@@ -376,19 +391,23 @@ class PixUpApp:
         for w in self.center.winfo_children():
             w.destroy()
         s = next(x for x in self.steps if x["id"] == step_id)
-        card = tk.Frame(self.center, bg=c["card"], padx=40, pady=34,
+        card = tk.Frame(self.center, bg=c["card"], padx=34, pady=30,
                         highlightthickness=1, highlightbackground=c["border"])
-        card.pack(fill="both", expand=True, padx=24, pady=20)
-        tk.Label(card, text=f"{s['emoji']}  ขั้นที่ {s['no']}", bg=c["card"], fg=c[s["color"]],
-                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        tk.Label(card, text=s["title"], bg=c["card"], fg=c["text"],
-                 font=("Segoe UI", 22, "bold")).pack(anchor="w", pady=(2, 0))
-        tk.Label(card, text=s["desc"], bg=c["card"], fg=c["text_dim"], font=("Segoe UI", 11),
-                 wraplength=620, justify="left").pack(anchor="w", pady=(14, 0))
+        card.pack(fill="both", expand=True, padx=22, pady=20)
+
+        head = tk.Frame(card, bg=c["card"]); head.pack(anchor="w", fill="x")
+        tk.Label(head, text=f"ขั้นที่ {s['no']}", bg=c["accent"], fg=c["on_accent"],
+                 font=("Segoe UI", 9, "bold"), padx=9, pady=2).pack(side="left")
+        tk.Label(head, text=s["sub"].upper(), bg=c["card"], fg=c["text_mute"],
+                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(8, 0))
+        tk.Label(card, text=f"{s['emoji']}  {s['title']}", bg=c["card"], fg=c["text"],
+                 font=("Segoe UI", 20, "bold")).pack(anchor="w", pady=(12, 0))
+        tk.Label(card, text=s["desc"], bg=c["card"], fg=c["text_dim"], font=("Segoe UI", 10),
+                 wraplength=540, justify="left").pack(anchor="w", pady=(10, 0))
 
         btn = self._styled_button(card, f"{s['emoji']}  เริ่ม{s['title']}", s["action"],
-                                  c[s["color"]], c["on_accent"])
-        btn.pack(fill="x", pady=(28, 0), ipady=6)
+                                  c["accent"], c["on_accent"])
+        btn.pack(fill="x", pady=(26, 0), ipady=6)
         if step_id == "ai":
             self.ai_btn = btn
 
@@ -398,55 +417,74 @@ class PixUpApp:
         nav = tk.Frame(card, bg=c["card"]); nav.pack(side="bottom", fill="x", pady=(18, 0))
         ids = [x["id"] for x in self.steps]; i = ids.index(step_id)
         if i > 0:
-            tk.Button(nav, text="‹ ก่อนหน้า", command=lambda: self.show_step(ids[i - 1]),
-                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
-                      cursor="hand2", padx=10, pady=4).pack(side="left")
+            self._nav_button(nav, "‹ ก่อนหน้า", lambda: self.show_step(ids[i - 1])).pack(side="left")
         if i < len(ids) - 1:
-            tk.Button(nav, text="ถัดไป ›", command=lambda: self.show_step(ids[i + 1]),
-                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
-                      cursor="hand2", padx=10, pady=4).pack(side="right")
+            self._nav_button(nav, "ถัดไป ›", lambda: self.show_step(ids[i + 1])).pack(side="right")
+
+    def _nav_button(self, parent, text, cmd):
+        c = self.colors
+        b = tk.Button(parent, text=text, command=cmd, bg=c["btn_default"], fg=c["text"],
+                      relief="flat", font=("Segoe UI", 9), cursor="hand2", padx=12, pady=5,
+                      activebackground=c["btn_hover"])
+        b.bind("<Enter>", lambda e: b.config(bg=c["btn_hover"]))
+        b.bind("<Leave>", lambda e: b.config(bg=c["btn_default"]))
+        return b
 
     def _render_panel(self, step_id):
         c = self.colors
         for w in self.right.winfo_children():
             w.destroy()
         tk.Label(self.right, text="ตัวเลือก", bg=c["panel"], fg=c["text_mute"],
-                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=16, pady=(16, 6))
+                 font=("Segoe UI", 7, "bold")).pack(anchor="w", padx=18, pady=(18, 6))
 
         def panel_card(title):
-            f = tk.Frame(self.right, bg=c["card"], padx=12, pady=10,
+            f = tk.Frame(self.right, bg=c["card"], padx=12, pady=11,
                          highlightthickness=1, highlightbackground=c["border"])
-            f.pack(fill="x", padx=12, pady=6)
+            f.pack(fill="x", padx=14, pady=6)
             tk.Label(f, text=title, bg=c["card"], fg=c["text_dim"],
-                     font=("Segoe UI", 8, "bold")).pack(anchor="w")
+                     font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(0, 4))
             return f
 
-        # ปุ่มเปิดโฟลเดอร์ที่เกี่ยวข้อง
-        f = panel_card("เปิดโฟลเดอร์")
-        tk.Button(f, text="📂 เปิด Workspace", command=lambda: self.open_folder(self.source_dir.get()),
-                  bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
-                  cursor="hand2").pack(fill="x", pady=(6, 2))
+        def pbtn(parent, text, cmd):
+            b = tk.Button(parent, text=text, command=cmd, bg=c["btn_default"], fg=c["text"],
+                          relief="flat", font=("Segoe UI", 9), cursor="hand2", anchor="w",
+                          activebackground=c["btn_hover"], padx=8)
+            b.pack(fill="x", pady=3, ipady=3)
+            b.bind("<Enter>", lambda e: b.config(bg=c["btn_hover"]))
+            b.bind("<Leave>", lambda e: b.config(bg=c["btn_default"]))
+
+        # ตัวเลือก/ปุ่มที่เกี่ยวข้องกับขั้นนั้นๆ
+        acts = panel_card("เปิดโฟลเดอร์ & เครื่องมือ")
         if step_id == "import":
-            tk.Button(f, text="📷 เปิดโฟลเดอร์กล้อง", command=lambda: self.open_folder(self.camera_source.get()),
-                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
-                      cursor="hand2").pack(fill="x", pady=2)
-        if step_id in ("collect",):
-            tk.Button(f, text="🗄 เปิด Photo 1", command=lambda: self.open_folder(self.photo1_dir.get()),
-                      bg=c["btn_default"], fg=c["text"], relief="flat", font=("Segoe UI", 9),
-                      cursor="hand2").pack(fill="x", pady=2)
+            pbtn(acts, "📷 เปิดโฟลเดอร์กล้อง", lambda: self.open_folder(self.camera_source.get()))
+            pbtn(acts, "📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "🗂 จัดกลุ่มตามรหัส", lambda: workflow.phase_group(self))
+            pbtn(acts, "🧹 ล้างความจำการนำเข้า", self.reset_import_memory)
+        elif step_id == "collect":
+            pbtn(acts, "🗄 เปิด Photo 1", lambda: self.open_folder(self.photo1_dir.get()))
+            pbtn(acts, "🗄 เปิด Photo 2", lambda: self.open_folder(self.photo2_dir.get()))
+            pbtn(acts, "📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+        elif step_id == "ai":
+            pbtn(acts, "📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "⚙ ตั้งค่า ChatGPT", self.open_settings)
+        elif step_id == "archive":
+            pbtn(acts, "📦 เปิดคลัง", lambda: self.open_folder(self.archive_dir.get()))
+            pbtn(acts, "📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+        else:  # merge, crop, rename
+            pbtn(acts, "📂 เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
 
         info = panel_card("คำแนะนำ")
         tips = {
-            "import": "ตั้งโฟลเดอร์กล้องในหน้า ⚙ ก่อน • โหมด 'ดึงเฉพาะใหม่' จะไม่ดึงซ้ำ",
+            "import": "ตั้งโฟลเดอร์กล้องในหน้า ⚙ ก่อน • โหมด 'ดึงเฉพาะใหม่' จะไม่ดึงซ้ำ • จัดกลุ่มตามรหัส = แยกไฟล์หลวมเข้าโฟลเดอร์",
             "merge": "เลือก 2 รูปต่อโฟลเดอร์ • ลาก/ซูมในกรอบ • ส่วนเกินกรอบถูกครอป",
             "crop": "เลือกได้หลายรูป • ลากเพื่อย้าย ล้อเมาส์เพื่อซูม",
             "ai": "ควรรวม/ครอปก่อน • ล็อกอิน ChatGPT ครั้งเดียว • กดปุ่มอีกครั้งเพื่อยกเลิกระหว่างทำ",
-            "rename": "รูปกรอบเขียว = ผ่าน AI แล้ว แนะนำเลือกเป็นรูปหลัก",
-            "collect": "พรีวิวก่อนคัดลอก • ไม่พบหมวด=ข้าม • ติ๊กอนุญาตถ้าต้องสร้างช่วงใหม่",
+            "rename": "ตั้งชื่อโฟลเดอร์เป็นรหัสสินค้าจริงก่อน • รูปกรอบเขียว = ผ่าน AI แนะนำเลือกเป็นรูปหลัก",
+            "collect": "พรีวิวทีละสินค้า เห็นรูปปลายทาง • เลือกแทน/ไม่แทน/ข้าม • ไม่พบหมวด=ข้าม",
             "archive": "ย้าย (ไม่ใช่คัดลอก) ทุกโฟลเดอร์เข้าคลังตามวันที่",
         }
         tk.Label(info, text=tips.get(step_id, ""), bg=c["card"], fg=c["text_dim"],
-                 font=("Segoe UI", 9), wraplength=250, justify="left").pack(anchor="w", pady=(6, 0))
+                 font=("Segoe UI", 9), wraplength=210, justify="left").pack(anchor="w")
 
     def _styled_button(self, parent, text, cmd, bg, fg):
         b = tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, font=("Segoe UI", 11, "bold"),
@@ -454,28 +492,6 @@ class PixUpApp:
         b.bind("<Enter>", lambda e: b.config(bg=self.colors["accent_hover"] if bg == self.colors["accent"] else self.colors["btn_hover"]))
         b.bind("<Leave>", lambda e: b.config(bg=bg))
         return b
-
-    # ===================== theme switching =====================
-    def change_theme(self, name):
-        self.theme_name = name
-        self.colors = theme_mod.build_palette(self.theme_name, self.accent)
-        self.save_settings()
-        self._rebuild_ui()
-
-    def pick_accent(self):
-        rgb, hx = colorchooser.askcolor(color=self.accent, title="เลือกสี Accent")
-        if hx:
-            self.accent = hx
-            self.colors = theme_mod.build_palette(self.theme_name, self.accent)
-            self.save_settings()
-            self._rebuild_ui()
-
-    def _rebuild_ui(self):
-        for w in self.root.winfo_children():
-            w.destroy()
-        self.step_widgets = {}
-        self.build_ui()
-        self.log("เปลี่ยนธีม/สีแล้ว", "success")
 
     # ===================== animation =====================
     def _animation_loop(self):
@@ -657,8 +673,7 @@ class PixUpApp:
             tk.Button(tools, text=text, command=cmd, bg=c["btn_default"], fg=c["text"], relief="flat",
                       font=("Segoe UI", 9), cursor="hand2", anchor="w").pack(fill="x", pady=3)
 
-        tool("🗂 จัดกลุ่มตามรหัส", lambda: [win.destroy(), workflow.phase_group(self)])
-        tool("🏷 จัดการหมวดหมู่สินค้า (R/N/E/UN ...)", lambda: [win.destroy(), self.open_category_manager()])
+        tool("🏷 จัดการหมวดหมู่สินค้า (R/N/E ...)", lambda: [win.destroy(), self.open_category_manager()])
         tool("🧹 ล้างความจำการนำเข้า", self.reset_import_memory)
         tool("📜 เปิดโฟลเดอร์ Log", lambda: self.open_folder(config.CONFIG_DIR))
 
