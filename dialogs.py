@@ -136,9 +136,9 @@ def image_selector(root, colors, folder_paths, max_per_folder, title, subtitle="
         sel.clear(); sel.update(final)
         win.destroy()
 
-    _btn(barin, "ยืนยัน ✓", on_ok, colors, kind="accent", height=38, width=130,
+    _btn(barin, "Confirm ✓", on_ok, colors, kind="accent", height=38, width=130,
          font=(FONT, 13, "bold")).pack(side="right")
-    _btn(barin, "ยกเลิก", win.destroy, colors, height=38, width=100,
+    _btn(barin, "Cancel", win.destroy, colors, height=38, width=100,
          font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     scroll = ctk.CTkScrollableFrame(win, fg_color="transparent")
@@ -347,21 +347,21 @@ def merge_editor(root, colors, ai_paths, out_dir, folder_name, current, total, d
         state[0], state[1] = state[1], state[0]
         zoom_vars[0].set(round(state[0]["scale"], 2)); zoom_vars[1].set(round(state[1]["scale"], 2))
         refresh()
-    _btn(ctrl, "⇄ สลับ", swap, colors, width=80, height=30).pack(side="left", padx=(0, 6))
+    _btn(ctrl, "⇄ Swap", swap, colors, width=80, height=30).pack(side="left", padx=(0, 6))
 
     def reset():
         for i in range(2):
             state[i] = {"scale": 1.0, "ox": COMP // 4, "oy": COMP // 2}
             zoom_vars[i].set(1.0)
         refresh()
-    _btn(ctrl, "รีเซ็ต", reset, colors, width=80, height=30).pack(side="left")
+    _btn(ctrl, "Reset", reset, colors, width=80, height=30).pack(side="left")
 
     def save_and_next():
         build(COMP).save(os.path.join(out_dir, f"{folder_name}-merged.jpg"), "JPEG", quality=95, optimize=True)
         win.destroy(); done_event.set()
-    _btn(barin, "บันทึก & ถัดไป →", save_and_next, colors, kind="success", height=40,
+    _btn(barin, "Save & Next →", save_and_next, colors, kind="success", height=40,
          font=(FONT, 13, "bold")).pack(side="right")
-    _btn(barin, "ข้าม", lambda: [win.destroy(), done_event.set()], colors, height=40,
+    _btn(barin, "Skip", lambda: [win.destroy(), done_event.set()], colors, height=40,
          width=90, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), done_event.set()])
@@ -442,16 +442,16 @@ def crop_editor(root, colors, img_path, out_dir, filename, current, total, done_
     ctk.CTkLabel(ctrl, text="ZOOM", text_color=colors["text"], width=50).pack(side="left")
     ctk.CTkSlider(ctrl, from_=0.1, to=3.0, variable=scale_var, command=lambda v: apply_scale(scale_var.get()),
                   progress_color=colors["accent"], button_color=colors["accent"]).pack(side="left", fill="x", expand=True)
-    _btn(ctrl, "รีเซ็ต", lambda: (st.update({"scale": 1.0, "cx": COMP / 2, "cy": COMP / 2}),
+    _btn(ctrl, "Reset", lambda: (st.update({"scale": 1.0, "cx": COMP / 2, "cy": COMP / 2}),
                                   scale_var.set(1.0), refresh()), colors,
          width=80, height=30).pack(side="left", padx=(10, 0))
 
     def save_and_next():
         build(COMP).save(img_path, "JPEG", quality=95, optimize=True)
         win.destroy(); done_event.set()
-    _btn(barin, "บันทึก & ถัดไป →", save_and_next, colors, kind="success", height=40,
+    _btn(barin, "Save & Next →", save_and_next, colors, kind="success", height=40,
          font=(FONT, 13, "bold")).pack(side="right")
-    _btn(barin, "ข้าม", lambda: [win.destroy(), done_event.set()], colors, height=40,
+    _btn(barin, "Skip", lambda: [win.destroy(), done_event.set()], colors, height=40,
          width=90, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     win.protocol("WM_DELETE_WINDOW", lambda: [win.destroy(), done_event.set()])
@@ -488,9 +488,9 @@ def collect_preview(root, colors, plan):
 
     def ok():
         confirmed["ok"] = True; win.destroy()
-    _btn(barin, "ยืนยันคัดลอกทั้งหมด →", ok, colors, kind="accent", height=40,
+    _btn(barin, "Confirm All →", ok, colors, kind="accent", height=40,
          font=(FONT, 13, "bold")).pack(side="right")
-    _btn(barin, "ยกเลิก", win.destroy, colors, height=40, width=90,
+    _btn(barin, "Cancel", win.destroy, colors, height=40, width=90,
          font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     detail = ctk.CTkFrame(win, fg_color="transparent"); detail.pack(fill="both", expand=True, padx=16, pady=8)
@@ -542,10 +542,10 @@ def collect_preview(root, colors, plan):
 
         nav = ctk.CTkFrame(detail, fg_color="transparent"); nav.pack(fill="x", pady=(16, 0))
         if idx["i"] > 0:
-            _btn(nav, "‹ ก่อนหน้า", lambda: go(-1), colors, height=34, width=110,
+            _btn(nav, "‹ Previous", lambda: go(-1), colors, height=34, width=110,
                  font=(FONT, 12, "bold")).pack(side="left")
         if idx["i"] < n - 1:
-            _btn(nav, "ถัดไป ›", lambda: go(1), colors, height=34, width=110,
+            _btn(nav, "Next ›", lambda: go(1), colors, height=34, width=110,
                  font=(FONT, 12, "bold")).pack(side="right")
 
     def go(d):
@@ -611,8 +611,8 @@ def import_options(root, colors):
                        "date_to": date_to.get().strip(), "codes": codes.get().strip()})
         win.destroy()
     bar = ctk.CTkFrame(win, fg_color="transparent"); bar.pack(fill="x", side="bottom", padx=24, pady=16)
-    _btn(bar, "เริ่มนำเข้า →", ok, colors, kind="accent", height=42, font=(FONT, 13, "bold")).pack(side="right")
-    _btn(bar, "ยกเลิก", win.destroy, colors, height=42, width=100, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
+    _btn(bar, "Start Import →", ok, colors, kind="accent", height=42, font=(FONT, 13, "bold")).pack(side="right")
+    _btn(bar, "Cancel", win.destroy, colors, height=42, width=100, font=(FONT, 12, "bold")).pack(side="right", padx=(0, 10))
 
     root.wait_window(win)
     return result if result else None

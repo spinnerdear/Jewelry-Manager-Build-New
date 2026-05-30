@@ -13,6 +13,17 @@
 - If a phase moves, deletes, or overwrites files, keep recovery behavior and visible error logging.
 - When handing off, add a dated note below with: author/tool, files changed, tests run, and remaining risk.
 
+### 2026-05-30 (#5) - Claude Code — v2.4 (แก้ตามฟีดแบ็กเทส Windows)
+
+ต่อบน `customtkinter-ui` หลังผู้ใช้เทส .exe Beta 1 บน Windows (เปิดได้ ✓)
+- เอา "Beta" ออก → version = **2.4**
+- **แก้ขั้นที่ 7 หาย:** ลด step button height 40→34/pady, log 210→140, window 1160x840 → 7 ขั้นแสดงครบ
+- **ปุ่ม Crop เว้นระยะแปลก:** เอา emoji ✂️ ออกจากปุ่ม Start (ใช้ "▶ Start {sub}" ทุกขั้น) → ระยะเท่ากัน
+- **ปุ่มทั้งหมดเป็นอังกฤษ** (sidebar=sub อังกฤษ, Settings/Select Folder/Start/Previous/Next/Open.../Add/Delete,
+  section headers, dialog buttons Confirm/Cancel/Save&Next/Skip/Swap/Reset) — **หัวข้อ/คำอธิบาย/tips/log คงไทย**
+- **แก้ไอคอนหน้าต่างผิด:** bundle `app_icon.ico` เข้า .exe (`--add-data`) + ยิง `iconbitmap` ซ้ำ 200/500/1000/1800ms
+  ให้ชนะที่ CTk รีเซ็ต (เดิมไม่ได้ bundle .ico → resource_path หาไม่เจอ → ใช้ไอคอน default)
+
 ### 2026-05-30 (#4) - Claude Code — v2.4 Beta 1 (แปลงทั้งโปรแกรมเป็น CustomTkinter)
 
 branch: `customtkinter-ui` (แตกจาก improve-7-features). **แผนสำรอง:** Beta 3 ยังอยู่ครบที่

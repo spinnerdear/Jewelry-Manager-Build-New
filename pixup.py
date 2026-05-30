@@ -31,7 +31,7 @@ except ImportError:
 IMAGE_EXTENSIONS = ('.jpg', '.jpeg', '.png')
 VIDEO_EXTENSIONS = ('.mp4', '.mov', '.avi', '.mkv', '.m4v', '.wmv')
 
-VERSION = "2.4 Beta 1"
+VERSION = "2.4"
 
 FONT = "Segoe UI"
 
@@ -46,10 +46,10 @@ class PixUpApp:
     def __init__(self, root):
         self.root = root
         # literal เพื่อให้ .github/workflows/build.yml grep เวอร์ชันได้ (อย่าเปลี่ยนเป็นตัวแปร)
-        self.version = "2.4 Beta 1"
+        self.version = "2.4"
         self.root.title(f"PixUp v{self.version}")
-        self.root.geometry("1140x800")
-        self.root.minsize(980, 680)
+        self.root.geometry("1160x840")
+        self.root.minsize(980, 700)
         self._set_window_icon()
 
         self.error_codes = {
@@ -218,7 +218,7 @@ class PixUpApp:
         def _do():
             try:
                 if self.ai_btn and self.ai_btn.winfo_exists():
-                    self.ai_btn.configure(text="■ ยกเลิก AI", fg_color=self.colors["error"],
+                    self.ai_btn.configure(text="■ Cancel AI", fg_color=self.colors["error"],
                                           hover_color=self.colors["error"], text_color="#ffffff",
                                           command=self.cancel_ai, state="normal")
             except tk.TclError:
@@ -230,7 +230,7 @@ class PixUpApp:
             try:
                 if self.ai_btn and self.ai_btn.winfo_exists():
                     st = next(s for s in self.steps if s["id"] == "ai")
-                    self.ai_btn.configure(text=f"{st['emoji']}  เริ่ม{st['title']}",
+                    self.ai_btn.configure(text=f"▶   Start {st['sub']}",
                                           fg_color=self.colors["accent"], hover_color=self.colors["accent_hover"],
                                           text_color=self.colors["on_accent"], command=st["action"], state="normal")
             except (tk.TclError, StopIteration):
@@ -242,7 +242,7 @@ class PixUpApp:
         self.log("กำลังยกเลิก AI... จะหยุดหลังรูปปัจจุบันเสร็จ", "warning")
         try:
             if self.ai_btn and self.ai_btn.winfo_exists():
-                self.ai_btn.configure(text="⌛ กำลังยกเลิก...", state="disabled")
+                self.ai_btn.configure(text="⌛ Cancelling...", state="disabled")
         except tk.TclError:
             pass
 
@@ -285,7 +285,7 @@ class PixUpApp:
         ctk.CTkLabel(wm, text=f"v{self.version}", text_color=c["text_mute"],
                      font=(FONT, 11)).pack(anchor="w", pady=(0, 2))
 
-        ctk.CTkButton(h, text="⚙  ตั้งค่า", command=self.open_settings, width=90, height=34,
+        ctk.CTkButton(h, text="⚙  Settings", command=self.open_settings, width=100, height=34,
                       fg_color=c["card"], hover_color=c["card_hi"], text_color=c["text"],
                       corner_radius=8, font=(FONT, 12)).pack(side="right", padx=(8, 18))
 
@@ -298,18 +298,18 @@ class PixUpApp:
         self.source_entry = ctk.CTkEntry(ws, textvariable=self.source_dir, font=("Consolas", 11),
                                          fg_color=c["input_bg"], border_width=0, height=32)
         self.source_entry.pack(fill="x", pady=(6, 6))
-        ctk.CTkButton(ws, text="เลือกโฟลเดอร์", command=lambda: self.browse_dir(self.source_dir, False),
+        ctk.CTkButton(ws, text="Select Folder", command=lambda: self.browse_dir(self.source_dir, False),
                       fg_color=c["card"], hover_color=c["card_hi"], text_color=c["text"],
                       height=30, corner_radius=8, font=(FONT, 12)).pack(fill="x")
 
-        ctk.CTkLabel(self.left, text="ขั้นตอน", text_color=c["text_mute"],
-                     font=(FONT, 10, "bold")).pack(anchor="w", padx=18, pady=(14, 6))
+        ctk.CTkLabel(self.left, text="STEPS", text_color=c["text_mute"],
+                     font=(FONT, 10, "bold")).pack(anchor="w", padx=18, pady=(12, 4))
         for s in self.steps:
-            btn = ctk.CTkButton(self.left, text=f"  {s['no']}   {s['emoji']} {s['title']}",
+            btn = ctk.CTkButton(self.left, text=f"  {s['no']}   {s['emoji']} {s['sub']}",
                                 anchor="w", fg_color="transparent", text_color=c["text_dim"],
-                                hover_color=c["card_hi"], corner_radius=8, height=40,
+                                hover_color=c["card_hi"], corner_radius=8, height=34,
                                 font=(FONT, 13), command=lambda sid=s["id"]: self.show_step(sid))
-            btn.pack(fill="x", padx=10, pady=2)
+            btn.pack(fill="x", padx=10, pady=1)
             self.step_widgets[s["id"]] = btn
 
     def _build_footer(self):
@@ -333,7 +333,7 @@ class PixUpApp:
                                         fg_color="transparent", hover_color=c["card"], text_color=c["text_dim"],
                                         width=70, height=24, font=(FONT, 11))
         self.log_toggle.pack(side="right")
-        self.log_area = ctk.CTkTextbox(wrap, height=210, fg_color=c["input_bg"], text_color=c["text_dim"],
+        self.log_area = ctk.CTkTextbox(wrap, height=140, fg_color=c["input_bg"], text_color=c["text_dim"],
                                        font=("Consolas", 12), corner_radius=8, border_width=0)
         self.log_area.pack(fill="both", expand=True, padx=18, pady=(6, 12))
         self.log_box = self.log_area._textbox
@@ -369,7 +369,7 @@ class PixUpApp:
             active = (s["id"] == self.current_step)
             done = (s["id"] in self.completed_steps)
             mark = "✓" if done else s["no"]
-            text = f"  {mark}   {s['emoji']} {s['title']}"
+            text = f"  {mark}   {s['emoji']} {s['sub']}"
             if active:
                 btn.configure(text=text, fg_color=c["accent"], text_color=c["on_accent"],
                               hover_color=c["accent_hover"])
@@ -390,7 +390,7 @@ class PixUpApp:
         inner.pack(fill="both", expand=True, padx=34, pady=30)
 
         head = ctk.CTkFrame(inner, fg_color="transparent"); head.pack(anchor="w", fill="x")
-        ctk.CTkLabel(head, text=f" ขั้นที่ {s['no']} ", fg_color=c["accent"], text_color=c["on_accent"],
+        ctk.CTkLabel(head, text=f" STEP {s['no']} ", fg_color=c["accent"], text_color=c["on_accent"],
                      font=(FONT, 12, "bold"), corner_radius=6).pack(side="left", ipady=1)
         ctk.CTkLabel(head, text=s["sub"].upper(), text_color=c["text_mute"],
                      font=(FONT, 11, "bold")).pack(side="left", padx=(8, 0))
@@ -399,7 +399,7 @@ class PixUpApp:
         ctk.CTkLabel(inner, text=s["desc"], text_color=c["text_dim"], font=(FONT, 13),
                      wraplength=540, justify="left").pack(anchor="w", pady=(10, 0))
 
-        btn = ctk.CTkButton(inner, text=f"{s['emoji']}  เริ่ม{s['title']}", command=s["action"],
+        btn = ctk.CTkButton(inner, text=f"▶   Start {s['sub']}", command=s["action"],
                             fg_color=c["accent"], hover_color=c["accent_hover"], text_color=c["on_accent"],
                             height=48, corner_radius=10, font=(FONT, 15, "bold"))
         btn.pack(fill="x", pady=(26, 0))
@@ -412,11 +412,11 @@ class PixUpApp:
         nav = ctk.CTkFrame(inner, fg_color="transparent"); nav.pack(side="bottom", fill="x", pady=(18, 0))
         ids = [x["id"] for x in self.steps]; i = ids.index(step_id)
         if i > 0:
-            ctk.CTkButton(nav, text="‹ ก่อนหน้า", command=lambda: self.show_step(ids[i - 1]),
+            ctk.CTkButton(nav, text="‹ Previous", command=lambda: self.show_step(ids[i - 1]),
                           fg_color=c["card_hi"], hover_color=c["btn_hover"], text_color=c["text"],
                           width=110, height=34, corner_radius=8, font=(FONT, 12)).pack(side="left")
         if i < len(ids) - 1:
-            ctk.CTkButton(nav, text="ถัดไป ›", command=lambda: self.show_step(ids[i + 1]),
+            ctk.CTkButton(nav, text="Next ›", command=lambda: self.show_step(ids[i + 1]),
                           fg_color=c["card_hi"], hover_color=c["btn_hover"], text_color=c["text"],
                           width=110, height=34, corner_radius=8, font=(FONT, 12)).pack(side="right")
 
@@ -424,7 +424,7 @@ class PixUpApp:
         c = self.colors
         for w in self.right.winfo_children():
             w.destroy()
-        ctk.CTkLabel(self.right, text="ตัวเลือก", text_color=c["text_mute"],
+        ctk.CTkLabel(self.right, text="OPTIONS", text_color=c["text_mute"],
                      font=(FONT, 10, "bold")).pack(anchor="w", padx=18, pady=(18, 6))
 
         def panel_card(title):
@@ -439,27 +439,27 @@ class PixUpApp:
                           hover_color=c["btn_hover"], text_color=c["text"], anchor="w",
                           height=32, corner_radius=8, font=(FONT, 12)).pack(fill="x", padx=10, pady=3)
 
-        acts = panel_card("เปิดโฟลเดอร์ & เครื่องมือ")
+        acts = panel_card("FOLDERS & TOOLS")
         if step_id == "import":
-            pbtn(acts, "📷  เปิดโฟลเดอร์กล้อง", lambda: self.open_folder(self.camera_source.get()))
-            pbtn(acts, "📂  เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
-            pbtn(acts, "🗂  จัดกลุ่มตามรหัส", lambda: workflow.phase_group(self))
-            pbtn(acts, "🧹  ล้างความจำการนำเข้า", self.reset_import_memory)
+            pbtn(acts, "📷  Open Camera Folder", lambda: self.open_folder(self.camera_source.get()))
+            pbtn(acts, "📂  Open Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "🗂  Group by Code", lambda: workflow.phase_group(self))
+            pbtn(acts, "🧹  Reset Import Memory", self.reset_import_memory)
         elif step_id == "collect":
-            pbtn(acts, "🗄  เปิด Photo 1", lambda: self.open_folder(self.photo1_dir.get()))
-            pbtn(acts, "🗄  เปิด Photo 2", lambda: self.open_folder(self.photo2_dir.get()))
-            pbtn(acts, "📂  เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "🗄  Open Photo 1", lambda: self.open_folder(self.photo1_dir.get()))
+            pbtn(acts, "🗄  Open Photo 2", lambda: self.open_folder(self.photo2_dir.get()))
+            pbtn(acts, "📂  Open Workspace", lambda: self.open_folder(self.source_dir.get()))
         elif step_id == "ai":
-            pbtn(acts, "📂  เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
-            pbtn(acts, "⚙  ตั้งค่า ChatGPT", self.open_settings)
+            pbtn(acts, "📂  Open Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "⚙  ChatGPT Settings", self.open_settings)
         elif step_id == "archive":
-            pbtn(acts, "📦  เปิดคลัง", lambda: self.open_folder(self.archive_dir.get()))
-            pbtn(acts, "📂  เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "📦  Open Archive", lambda: self.open_folder(self.archive_dir.get()))
+            pbtn(acts, "📂  Open Workspace", lambda: self.open_folder(self.source_dir.get()))
         else:  # merge, crop, rename
-            pbtn(acts, "📂  เปิด Workspace", lambda: self.open_folder(self.source_dir.get()))
+            pbtn(acts, "📂  Open Workspace", lambda: self.open_folder(self.source_dir.get()))
         ctk.CTkFrame(acts, fg_color="transparent", height=4).pack()  # ระยะล่าง
 
-        info = panel_card("คำแนะนำ")
+        info = panel_card("TIPS")
         tips = {
             "import": "ตั้งโฟลเดอร์กล้องในหน้า ⚙ ก่อน • โหมด 'ดึงเฉพาะใหม่' จะไม่ดึงซ้ำ • จัดกลุ่มตามรหัส = แยกไฟล์หลวมเข้าโฟลเดอร์",
             "merge": "เลือก 2 รูปต่อโฟลเดอร์ • ลาก/ซูมในกรอบ • ส่วนเกินกรอบถูกครอป",
@@ -484,7 +484,7 @@ class PixUpApp:
             if self.is_running.get(s["id"]):
                 running_now = True
                 try:
-                    btn.configure(text=f"  {spin}   {s['emoji']} {s['title']}",
+                    btn.configure(text=f"  {spin}   {s['emoji']} {s['sub']}",
                                   fg_color=self.colors["accent"], text_color=self.colors["on_accent"])
                 except tk.TclError:
                     pass
@@ -498,14 +498,16 @@ class PixUpApp:
     # ===================== window icon =====================
     def _set_window_icon(self):
         """ตั้งไอคอนหน้าต่าง (title bar + taskbar) — รองรับทั้งรันสดและ .exe"""
+        ico = resource_path("app_icon.ico")
         if sys.platform.startswith("win"):
             try:
                 import ctypes
                 ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("KHCreation.PixUp")
             except Exception:
                 pass
-            # CTk รีเซ็ต iconbitmap ตอนเริ่ม → ตั้งหลัง delay ให้ชนะ
-            self.root.after(280, lambda: self._try(lambda: self.root.iconbitmap(resource_path("app_icon.ico"))))
+            # CustomTkinter รีเซ็ต iconbitmap ของหน้าต่างหลายครั้งตอนเริ่ม → ยิงซ้ำให้ชนะ
+            for delay in (200, 500, 1000, 1800):
+                self.root.after(delay, lambda p=ico: self._try(lambda: self.root.iconbitmap(p)))
         try:
             from PIL import Image, ImageTk
             self._icon_img = ImageTk.PhotoImage(Image.open(resource_path("logo.png")))
@@ -613,7 +615,7 @@ class PixUpApp:
 
         def save_close():
             self.save_settings(); win.destroy(); self.log("บันทึกการตั้งค่าแล้ว", "success")
-        ctk.CTkButton(win, text="บันทึก & ปิด", command=save_close, fg_color=c["accent"],
+        ctk.CTkButton(win, text="Save & Close", command=save_close, fg_color=c["accent"],
                       hover_color=c["accent_hover"], text_color=c["on_accent"], height=44,
                       corner_radius=10, font=(FONT, 14, "bold")).pack(side="bottom", fill="x", padx=24, pady=16)
 
@@ -638,16 +640,16 @@ class PixUpApp:
                       progress_color=c["accent"], font=(FONT, 12)).pack(anchor="w", padx=14, pady=14)
 
         tools = ctk.CTkFrame(body, fg_color=c["card"], corner_radius=12); tools.pack(fill="x", pady=6)
-        ctk.CTkLabel(tools, text="🛠  เครื่องมือ", text_color=c["text_dim"],
+        ctk.CTkLabel(tools, text="🛠  TOOLS", text_color=c["text_dim"],
                      font=(FONT, 11, "bold")).pack(anchor="w", padx=12, pady=(10, 4))
 
         def tool(text, cmd):
             ctk.CTkButton(tools, text=text, command=cmd, fg_color=c["btn_default"], hover_color=c["btn_hover"],
                           text_color=c["text"], anchor="w", height=32, corner_radius=8,
                           font=(FONT, 12)).pack(fill="x", padx=10, pady=3)
-        tool("🏷  จัดการหมวดหมู่สินค้า (R/N/E ...)", lambda: [win.destroy(), self.open_category_manager()])
-        tool("🧹  ล้างความจำการนำเข้า", self.reset_import_memory)
-        tool("📜  เปิดโฟลเดอร์ Log", lambda: self.open_folder(config.CONFIG_DIR))
+        tool("🏷  Manage Categories (R/N/E ...)", lambda: [win.destroy(), self.open_category_manager()])
+        tool("🧹  Reset Import Memory", self.reset_import_memory)
+        tool("📜  Open Log Folder", lambda: self.open_folder(config.CONFIG_DIR))
         ctk.CTkFrame(tools, fg_color="transparent", height=4).pack()
 
     def _path_card(self, parent, label, var):
@@ -703,7 +705,7 @@ class PixUpApp:
             if code and name:
                 self.type_mapping[code] = name; self.save_settings(); refresh()
                 c_e.delete(0, 100); n_e.delete(0, 100)
-        ctk.CTkButton(ctrl, text="เพิ่ม", command=add, width=64, fg_color=c["accent"],
+        ctk.CTkButton(ctrl, text="Add", command=add, width=64, fg_color=c["accent"],
                       hover_color=c["accent_hover"], text_color=c["on_accent"], font=(FONT, 12, "bold")).pack(side="right")
 
         def delete():
@@ -712,7 +714,7 @@ class PixUpApp:
                 code = str(tree.item(sel[0])['values'][0])
                 if messagebox.askyesno("Confirm", f"ลบ '{code}'?"):
                     self.type_mapping.pop(code, None); self.save_settings(); refresh()
-        ctk.CTkButton(m, text="ลบที่เลือก", command=delete, fg_color=c["error"], hover_color=c["error"],
+        ctk.CTkButton(m, text="Delete Selected", command=delete, fg_color=c["error"], hover_color=c["error"],
                       text_color="#ffffff", height=38, corner_radius=8,
                       font=(FONT, 13, "bold")).pack(fill="x", padx=20, pady=(4, 16))
 
